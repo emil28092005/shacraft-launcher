@@ -45,6 +45,12 @@ type NativeSettings = {
   memoryMb: number
 }
 
+type JavaInstallation = {
+  executable: string
+  major: number
+  version: string
+}
+
 const servers: Server[] = [
   {
     id: 'aoc',
@@ -76,6 +82,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ram, setRam] = useState(6)
   const [nativeHost, setNativeHost] = useState<NativeHost | null>(null)
+  const [java, setJava] = useState<JavaInstallation | null | undefined>(undefined)
 
   useEffect(() => {
     if (progress === null) return
@@ -96,6 +103,9 @@ function App() {
     invoke<NativeSettings>('load_settings')
       .then((settings) => setRam(settings.memoryMb / 1024))
       .catch(() => undefined)
+    invoke<JavaInstallation | null>('detect_java')
+      .then(setJava)
+      .catch(() => setJava(null))
   }, [])
 
   const updateRam = (memoryGb: number) => {
@@ -248,7 +258,22 @@ function App() {
           <input type="range" min="3" max="12" value={ram} onChange={(e) => updateRam(Number(e.target.value))} />
           <small>Для Aeronautics рекомендуется 6 ГБ</small>
         </label>
-        <button className="setting-row"><span><FolderOpen />Папка игры</span><ChevronRight /></button>
+        <div className="setting-row static">
+          <span><FolderOpen />Папка игры</span>
+          <small>{nativeHost ? 'В каталоге лаунчера' : 'Определяется…'}</small>
+        </div>
+        <div className="setting-row static">
+          <span><Wrench />Java</span>
+          <small>
+            {java === undefined
+              ? 'Проверяем…'
+              : java && java.major >= 21
+                ? `Java ${java.major} найдена`
+                : java
+                  ? `Нужна Java 21 · найдена ${java.major}`
+                  : 'Java не найдена'}
+          </small>
+        </div>
         <button className="setting-row"><span><Wrench />Дополнительные параметры</span><ChevronRight /></button>
         <div className="drawer-note">
           {nativeHost ? `Данные лаунчера: ${nativeHost.dataDir}` : 'Java 21 будет управляться лаунчером автоматически.'}

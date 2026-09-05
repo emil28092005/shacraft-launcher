@@ -1,3 +1,4 @@
+mod java;
 mod manifest;
 mod profile;
 mod settings;
@@ -27,6 +28,12 @@ fn native_host(app: AppHandle) -> Result<NativeHost, String> {
         data_dir: data_dir.display().to_string(),
         launcher_version: env!("CARGO_PKG_VERSION"),
     })
+}
+
+/// Detects an existing Java installation. This is read-only and never downloads Java.
+#[tauri::command]
+fn detect_java() -> Option<java::JavaInstallation> {
+    java::detect()
 }
 
 /// Validates an untrusted profile manifest before any file is downloaded.
@@ -97,6 +104,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             native_host,
+            detect_java,
             validate_manifest,
             inspect_profile,
             sync_profile,

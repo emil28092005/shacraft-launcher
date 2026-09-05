@@ -141,6 +141,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--green); out
 .setting-row span { display: flex; align-items: center; gap: 11px; font-size: 12px; }
 .setting-row svg { width: 17px; color: #677068; }
 .setting-row:hover { color: white; }
+.setting-row.static { cursor: default; }
+.setting-row.static:hover { color: #abb3ac; }
+.setting-row small { color: #7f8a80; font-size: 11px; }
 .drawer-note { position: absolute; left: 28px; right: 28px; bottom: 26px; padding: 13px 15px; background: #17231a; color: #8fb193; border-radius: 10px; font-size: 10px; }
 
 @media (max-width: 1160px) {
