@@ -1,3 +1,5 @@
+mod manifest;
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -25,9 +27,15 @@ fn native_host(app: AppHandle) -> Result<NativeHost, String> {
     })
 }
 
+/// Validates an untrusted profile manifest before any file is downloaded.
+#[tauri::command]
+fn validate_manifest(manifest_json: String) -> Result<(), String> {
+    manifest::validate_json(&manifest_json).map(|_| ()).map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_host])
+        .invoke_handler(tauri::generate_handler![native_host, validate_manifest])
         .run(tauri::generate_context!())
         .expect("error while running ShaCraft Launcher");
 }
