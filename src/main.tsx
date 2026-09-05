@@ -32,6 +32,7 @@ type Server = {
   version: string
   memory: string
   installed: boolean
+  profileId?: string
   disabled?: boolean
 }
 
@@ -51,6 +52,19 @@ type JavaInstallation = {
   version: string
 }
 
+type ProfileInspection = {
+  managedFiles: number
+  missingFiles: number
+  mismatchedFiles: number
+  upToDate: boolean
+}
+
+type SyncResult = {
+  downloadedFiles: number
+  reusedFiles: number
+  downloadedBytes: number
+}
+
 const servers: Server[] = [
   {
     id: 'aoc',
@@ -61,6 +75,7 @@ const servers: Server[] = [
     version: '1.21.1 · NeoForge',
     memory: '6 ГБ',
     installed: true,
+    profileId: 'aeronautics',
   },
   {
     id: 'create',
@@ -83,6 +98,9 @@ function App() {
   const [ram, setRam] = useState(6)
   const [nativeHost, setNativeHost] = useState<NativeHost | null>(null)
   const [java, setJava] = useState<JavaInstallation | null | undefined>(undefined)
+  const [profile, setProfile] = useState<ProfileInspection | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   useEffect(() => {
     if (progress === null) return
@@ -106,6 +124,12 @@ function App() {
     invoke<JavaInstallation | null>('detect_java')
       .then(setJava)
       .catch(() => setJava(null))
+    invoke<ProfileInspection>('inspect_remote_profile', { profileId: 'aeronautics' })
+      .then((inspection) => {
+        setProfile(inspection)
+        setReady(inspection.upToDate)
+      })
+      .catch(() => undefined)
   }, [])
 
   const updateRam = (memoryGb: number) => {
@@ -116,8 +140,23 @@ function App() {
     }
   }
 
-  const repair = () => {
+  const repair = async () => {
     if (selected.disabled) return
+    if ('__TAURI_INTERNALS__' in window && selected.profileId) {
+      setSyncError(null)
+      setSyncing(true)
+      setReady(false)
+      try {
+        const result = await invoke<SyncResult>('sync_remote_profile', { profileId: selected.profileId })
+        setProfile({ managedFiles: result.downloadedFiles + result.reusedFiles, missingFiles: 0, mismatchedFiles: 0, upToDate: true })
+        setReady(true)
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : 'Не удалось синхронизировать сборку')
+      } finally {
+        setSyncing(false)
+      }
+      return
+    }
     setReady(false)
     setProgress(0)
   }
@@ -205,7 +244,12 @@ function App() {
 
           <section className="play-dock">
             <div className="build-state">
-              {progress !== null ? (
+              {syncing ? (
+                <>
+                  <span className="state-icon downloading"><Download size={19} /></span>
+                  <span><strong>Синхронизируем сборку</strong><small>Скачиваем и проверяем файлы</small></span>
+                </>
+              ) : progress !== null ? (
                 <>
                   <span className="state-icon downloading"><Download size={19} /></span>
                   <span>
@@ -221,7 +265,7 @@ function App() {
               ) : (
                 <>
                   <span className="state-icon"><ShieldCheck size={19} /></span>
-                  <span><strong>{ready ? 'Сборка готова' : 'Требуется проверка'}</strong><small>Обновлено сегодня в 21:42</small></span>
+                  <span><strong>{ready ? 'Сборка готова' : 'Требуется проверка'}</strong><small>{syncError || (profile ? `${profile.managedFiles} файлов под контролем` : 'Проверяем локальные файлы')}</small></span>
                 </>
               )}
               {progress !== null && <div className="progress-track"><i style={{ width: `${progress}%` }} /></div>}
@@ -232,16 +276,16 @@ function App() {
               <span><Gauge size={15} /> {ram} ГБ памяти</span>
             </div>
 
-            <button className="repair-button" onClick={repair} disabled={progress !== null || selected.disabled} aria-label="Проверить файлы">
+            <button className="repair-button" onClick={repair} disabled={progress !== null || syncing || selected.disabled} aria-label="Проверить файлы">
               <RotateCcw size={19} />
             </button>
             <button
               className="play-button"
-              disabled={progress !== null || selected.disabled}
+              disabled={progress !== null || syncing || selected.disabled}
               onClick={() => !ready && repair()}
             >
               <Play size={21} fill="currentColor" />
-              <span>{selected.disabled ? 'Недоступно' : progress !== null ? 'Обновление' : ready ? 'Играть' : 'Проверить'}</span>
+              <span>{selected.disabled ? 'Недоступно' : syncing || progress !== null ? 'Обновление' : ready ? 'Играть' : 'Проверить'}</span>
             </button>
           </section>
         </main>

@@ -1,6 +1,7 @@
 mod java;
 mod manifest;
 mod profile;
+mod remote;
 mod settings;
 
 use serde::Serialize;
@@ -76,6 +77,30 @@ async fn sync_profile(app: AppHandle, manifest_json: String) -> Result<profile::
         .map_err(|error| error.to_string())
 }
 
+/// Loads and validates the published ShaCraft manifest before inspecting a profile.
+#[tauri::command]
+async fn inspect_remote_profile(app: AppHandle, profile_id: String) -> Result<profile::ProfileInspection, String> {
+    let data_dir = app.path().app_data_dir()
+        .map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let manifest = remote::fetch_manifest(&profile_id).map_err(|error| error.to_string())?;
+        profile::inspect(&data_dir.join("profiles").join(&manifest.id), &manifest)
+            .map_err(|error| error.to_string())
+    }).await.map_err(|error| format!("Profile inspection task failed: {error}"))?
+}
+
+/// Downloads missing or changed ShaCraft-managed files from the fixed v2 endpoint.
+#[tauri::command]
+async fn sync_remote_profile(app: AppHandle, profile_id: String) -> Result<profile::SyncResult, String> {
+    let data_dir = app.path().app_data_dir()
+        .map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let manifest = remote::fetch_manifest(&profile_id).map_err(|error| error.to_string())?;
+        profile::sync(&data_dir.join("profiles").join(&manifest.id), &manifest)
+            .map_err(|error| error.to_string())
+    }).await.map_err(|error| format!("Profile synchronization task failed: {error}"))?
+}
+
 #[tauri::command]
 async fn load_settings(app: AppHandle) -> Result<settings::LauncherSettings, String> {
     let data_dir = app
@@ -108,6 +133,8 @@ pub fn run() {
             validate_manifest,
             inspect_profile,
             sync_profile,
+            inspect_remote_profile,
+            sync_remote_profile,
             load_settings,
             save_settings
         ])
