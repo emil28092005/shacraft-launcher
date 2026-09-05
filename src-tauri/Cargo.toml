@@ -1,0 +1,18 @@
+[package]
+name = "shacraft-launcher"
+version = "0.1.0"
+description = "ShaCraft Minecraft launcher"
+authors = ["ShaCraft"]
+edition = "2021"
+
+[lib]
+name = "shacraft_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+

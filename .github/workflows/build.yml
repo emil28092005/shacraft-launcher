@@ -1,0 +1,36 @@
+name: Cross-platform build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04
+            args: --bundles appimage,deb
+          - name: Windows x64
+            os: windows-latest
+            args: --bundles nsis,msi
+          - name: macOS Apple Silicon
+            os: macos-14
+            args: --target aarch64-apple-darwin --bundles dmg
+          - name: macOS Intel
+            os: macos-13
+            args: --target x86_64-apple-darwin --bundles dmg
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run tauri:build -- ${{ matrix.args }}
