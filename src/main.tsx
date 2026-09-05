@@ -44,6 +44,7 @@ type NativeHost = {
 
 type NativeSettings = {
   memoryMb: number
+  nickname: string
 }
 
 type JavaInstallation = {
@@ -96,6 +97,7 @@ function App() {
   const [ready, setReady] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ram, setRam] = useState(6)
+  const [nickname, setNickname] = useState('Emil')
   const [nativeHost, setNativeHost] = useState<NativeHost | null>(null)
   const [java, setJava] = useState<JavaInstallation | null | undefined>(undefined)
   const [profile, setProfile] = useState<ProfileInspection | null>(null)
@@ -119,7 +121,7 @@ function App() {
     if (!('__TAURI_INTERNALS__' in window)) return
     invoke<NativeHost>('native_host').then(setNativeHost).catch(() => setNativeHost(null))
     invoke<NativeSettings>('load_settings')
-      .then((settings) => setRam(settings.memoryMb / 1024))
+      .then((settings) => { setRam(settings.memoryMb / 1024); setNickname(settings.nickname) })
       .catch(() => undefined)
     invoke<JavaInstallation | null>('detect_java')
       .then(setJava)
@@ -135,8 +137,14 @@ function App() {
   const updateRam = (memoryGb: number) => {
     setRam(memoryGb)
     if ('__TAURI_INTERNALS__' in window) {
-      invoke<NativeSettings>('save_settings', { settings: { memoryMb: memoryGb * 1024 } })
+      invoke<NativeSettings>('save_settings', { settings: { memoryMb: memoryGb * 1024, nickname } })
         .catch(() => undefined)
+    }
+  }
+
+  const saveNickname = () => {
+    if ('__TAURI_INTERNALS__' in window && /^[A-Za-z0-9_]{3,16}$/.test(nickname)) {
+      invoke<NativeSettings>('save_settings', { settings: { memoryMb: ram * 1024, nickname } }).catch(() => undefined)
     }
   }
 
@@ -218,7 +226,7 @@ function App() {
 
           <div className="account-chip">
             <span className="avatar">ES</span>
-            <span><strong>Émile</strong><small>offline-профиль</small></span>
+            <span><strong>{nickname}</strong><small>локальный профиль</small></span>
             <ChevronRight size={16} />
           </div>
         </aside>
@@ -301,6 +309,11 @@ function App() {
           <span><strong>Оперативная память</strong><b>{ram} ГБ</b></span>
           <input type="range" min="3" max="12" value={ram} onChange={(e) => updateRam(Number(e.target.value))} />
           <small>Для Aeronautics рекомендуется 6 ГБ</small>
+        </label>
+        <label className="text-setting">
+          <span><strong>Игровой ник</strong><small>Локальный профиль</small></span>
+          <input value={nickname} maxLength={16} onChange={(event) => setNickname(event.target.value)} onBlur={saveNickname} placeholder="Player" />
+          <small>Латинские буквы, цифры и _ · от 3 до 16 символов</small>
         </label>
         <div className="setting-row static">
           <span><FolderOpen />Папка игры</span>

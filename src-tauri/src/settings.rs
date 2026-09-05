@@ -5,16 +5,23 @@ const SETTINGS_FILE: &str = "settings.json";
 const MIN_MEMORY_MB: u16 = 3 * 1024;
 const MAX_MEMORY_MB: u16 = 12 * 1024;
 const DEFAULT_MEMORY_MB: u16 = 6 * 1024;
+const DEFAULT_NICKNAME: &str = "Emil";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LauncherSettings {
     pub memory_mb: u16,
+    #[serde(default = "default_nickname")]
+    pub nickname: String,
+}
+
+fn default_nickname() -> String {
+    DEFAULT_NICKNAME.into()
 }
 
 impl Default for LauncherSettings {
     fn default() -> Self {
-        Self { memory_mb: DEFAULT_MEMORY_MB }
+        Self { memory_mb: DEFAULT_MEMORY_MB, nickname: DEFAULT_NICKNAME.into() }
     }
 }
 
@@ -23,6 +30,7 @@ pub enum SettingsError {
     Io(io::Error),
     InvalidJson(serde_json::Error),
     InvalidMemory,
+    InvalidNickname,
 }
 
 impl fmt::Display for SettingsError {
@@ -31,6 +39,7 @@ impl fmt::Display for SettingsError {
             Self::Io(error) => write!(formatter, "Cannot access launcher settings: {error}"),
             Self::InvalidJson(error) => write!(formatter, "Cannot read launcher settings: {error}"),
             Self::InvalidMemory => write!(formatter, "Memory allocation must be between 3 and 12 GiB"),
+            Self::InvalidNickname => write!(formatter, "Nickname must be 3-16 ASCII letters, numbers, or underscores"),
         }
     }
 }
@@ -63,6 +72,9 @@ fn validate(settings: &LauncherSettings) -> Result<(), SettingsError> {
     if !(MIN_MEMORY_MB..=MAX_MEMORY_MB).contains(&settings.memory_mb) || settings.memory_mb % 1024 != 0 {
         return Err(SettingsError::InvalidMemory);
     }
+    if !(3..=16).contains(&settings.nickname.len()) || !settings.nickname.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+        return Err(SettingsError::InvalidNickname);
+    }
     Ok(())
 }
 
@@ -84,7 +96,7 @@ mod tests {
         let directory = temporary_directory();
         assert_eq!(load(&directory).unwrap().memory_mb, 6 * 1024);
 
-        let saved = save(&directory, LauncherSettings { memory_mb: 8 * 1024 }).unwrap();
+        let saved = save(&directory, LauncherSettings { memory_mb: 8 * 1024, nickname: "Emil".into() }).unwrap();
         assert_eq!(saved.memory_mb, 8 * 1024);
         assert_eq!(load(&directory).unwrap().memory_mb, 8 * 1024);
 
@@ -94,6 +106,7 @@ mod tests {
     #[test]
     fn rejects_unsafe_memory_values() {
         let directory = temporary_directory();
-        assert!(save(&directory, LauncherSettings { memory_mb: 512 }).is_err());
+        assert!(save(&directory, LauncherSettings { memory_mb: 512, nickname: "Emil".into() }).is_err());
+        assert!(save(&directory, LauncherSettings { memory_mb: 6 * 1024, nickname: "невалидный".into() }).is_err());
     }
 }
