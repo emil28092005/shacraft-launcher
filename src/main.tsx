@@ -41,6 +41,10 @@ type NativeHost = {
   launcherVersion: string
 }
 
+type NativeSettings = {
+  memoryMb: number
+}
+
 const servers: Server[] = [
   {
     id: 'aoc',
@@ -89,7 +93,18 @@ function App() {
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return
     invoke<NativeHost>('native_host').then(setNativeHost).catch(() => setNativeHost(null))
+    invoke<NativeSettings>('load_settings')
+      .then((settings) => setRam(settings.memoryMb / 1024))
+      .catch(() => undefined)
   }, [])
+
+  const updateRam = (memoryGb: number) => {
+    setRam(memoryGb)
+    if ('__TAURI_INTERNALS__' in window) {
+      invoke<NativeSettings>('save_settings', { settings: { memoryMb: memoryGb * 1024 } })
+        .catch(() => undefined)
+    }
+  }
 
   const repair = () => {
     if (selected.disabled) return
@@ -230,7 +245,7 @@ function App() {
         </div>
         <label className="range-setting">
           <span><strong>Оперативная память</strong><b>{ram} ГБ</b></span>
-          <input type="range" min="3" max="12" value={ram} onChange={(e) => setRam(Number(e.target.value))} />
+          <input type="range" min="3" max="12" value={ram} onChange={(e) => updateRam(Number(e.target.value))} />
           <small>Для Aeronautics рекомендуется 6 ГБ</small>
         </label>
         <button className="setting-row"><span><FolderOpen />Папка игры</span><ChevronRight /></button>

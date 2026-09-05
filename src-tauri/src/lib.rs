@@ -1,5 +1,6 @@
 mod manifest;
 mod profile;
+mod settings;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -68,9 +69,40 @@ async fn sync_profile(app: AppHandle, manifest_json: String) -> Result<profile::
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn load_settings(app: AppHandle) -> Result<settings::LauncherSettings, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || settings::load(&data_dir))
+        .await
+        .map_err(|error| format!("Settings task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_settings(app: AppHandle, settings: settings::LauncherSettings) -> Result<settings::LauncherSettings, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || settings::save(&data_dir, settings))
+        .await
+        .map_err(|error| format!("Settings task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_host, validate_manifest, inspect_profile, sync_profile])
+        .invoke_handler(tauri::generate_handler![
+            native_host,
+            validate_manifest,
+            inspect_profile,
+            sync_profile,
+            load_settings,
+            save_settings
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ShaCraft Launcher");
 }
