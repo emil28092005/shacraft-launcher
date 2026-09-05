@@ -40,7 +40,7 @@ pub struct ManagedFile {
     pub policy: FilePolicy,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FilePolicy {
     Managed,
@@ -135,7 +135,7 @@ fn is_safe_relative_path(value: &str) -> bool {
         && !value.split('/').any(|part| part.is_empty() || part == "." || part == "..")
 }
 
-fn is_allowed_download_url(value: &str) -> bool {
+pub(crate) fn is_allowed_download_url(value: &str) -> bool {
     let Ok(url) = Url::parse(value) else {
         return false;
     };

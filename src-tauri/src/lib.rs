@@ -51,9 +51,26 @@ async fn inspect_profile(app: AppHandle, manifest_json: String) -> Result<profil
         .map_err(|error| error.to_string())
 }
 
+/// Synchronizes launcher-managed files after manifest validation.
+#[tauri::command]
+async fn sync_profile(app: AppHandle, manifest_json: String) -> Result<profile::SyncResult, String> {
+    let manifest = manifest::validate_json(&manifest_json).map_err(|error| error.to_string())?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?
+        .join("profiles")
+        .join(&manifest.id);
+
+    tauri::async_runtime::spawn_blocking(move || profile::sync(&root, &manifest))
+        .await
+        .map_err(|error| format!("Profile synchronization task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_host, validate_manifest, inspect_profile])
+        .invoke_handler(tauri::generate_handler![native_host, validate_manifest, inspect_profile, sync_profile])
         .run(tauri::generate_context!())
         .expect("error while running ShaCraft Launcher");
 }
