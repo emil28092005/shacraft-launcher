@@ -1,8 +1,10 @@
 use serde::Deserialize;
 use std::{collections::HashSet, fmt};
+use url::Url;
 
 const MAX_MANIFEST_BYTES: usize = 2 * 1024 * 1024;
 const CURRENT_SCHEMA_VERSION: u32 = 1;
+const DOWNLOAD_HOSTS: [&str; 2] = ["shacraft.ru", "cdn.shacraft.ru"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,8 +108,8 @@ fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
         if !paths.insert(&file.path) {
             return Err(ManifestError::Invalid(format!("Duplicate file path: {}", file.path)));
         }
-        if !file.url.starts_with("https://") {
-            return Err(ManifestError::Invalid(format!("File URL must use HTTPS: {}", file.path)));
+        if !is_allowed_download_url(&file.url) {
+            return Err(ManifestError::Invalid(format!("File URL must use HTTPS and a ShaCraft host: {}", file.path)));
         }
         if file.size == 0 {
             return Err(ManifestError::Invalid(format!("File has zero size: {}", file.path)));
@@ -131,6 +133,13 @@ fn is_safe_relative_path(value: &str) -> bool {
         && !value.starts_with('\\')
         && !value.contains('\\')
         && !value.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+fn is_allowed_download_url(value: &str) -> bool {
+    let Ok(url) = Url::parse(value) else {
+        return false;
+    };
+    url.scheme() == "https" && url.host_str().is_some_and(|host| DOWNLOAD_HOSTS.contains(&host))
 }
 
 #[cfg(test)]
@@ -164,5 +173,10 @@ mod tests {
     #[test]
     fn rejects_insecure_downloads() {
         assert!(validate_json(&VALID.replace("https://", "http://")).is_err());
+    }
+
+    #[test]
+    fn rejects_third_party_download_hosts() {
+        assert!(validate_json(&VALID.replace("cdn.shacraft.ru", "example.com")).is_err());
     }
 }
