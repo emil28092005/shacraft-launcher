@@ -8,7 +8,7 @@ use crate::mojang::{self, MergedVersion};
 use crate::session::PlayerIdentity;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt, fs, io,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -57,6 +57,12 @@ fn classpath_separator() -> &'static str {
     }
 }
 
+fn unique_classpath_entries(mut entries: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    entries.retain(|path| seen.insert(path.clone()));
+    entries
+}
+
 fn build_classpath(game_dir: &Path, merged: &MergedVersion, client_jar: &Path) -> String {
     let no_features = HashMap::new();
     let mut entries: Vec<PathBuf> = merged
@@ -67,6 +73,11 @@ fn build_classpath(game_dir: &Path, merged: &MergedVersion, client_jar: &Path) -
         .map(|artifact| game_dir.join("libraries").join(&artifact.path))
         .collect();
     entries.push(client_jar.to_path_buf());
+    // NeoForge's inherited profile can repeat vanilla libraries verbatim.
+    // Passing the same jar twice makes SecureJarHandler abort during startup
+    // (for example on gson-2.10.1.jar), so preserve order and keep each path
+    // only once.
+    let entries = unique_classpath_entries(entries);
     entries.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(classpath_separator())
 }
 
@@ -134,7 +145,12 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
 
     let mut vars: HashMap<&str, String> = HashMap::new();
     vars.insert("auth_player_name", request.identity.name().to_string());
-    vars.insert("version_name", request.merged.id.clone());
+    // NeoForge's inherited JVM profile uses `${version_name}.jar` in
+    // `-DignoreList`. The actual client jar belongs to the vanilla parent
+    // (`1.21.1.jar`), not to the child profile (`neoforge-...`), so this
+    // token must identify the parent or both vanilla and patched Minecraft
+    // modules are loaded and Java aborts with a ResolutionException.
+    vars.insert("version_name", request.merged.client_jar_version_id.clone());
     vars.insert("game_directory", request.profile_dir.display().to_string());
     vars.insert("assets_root", assets_root.display().to_string());
     vars.insert("assets_index_name", request.merged.asset_index.id.clone());
@@ -202,5 +218,11 @@ mod tests {
         assert_eq!(substitute("--username", &vars), "--username");
         assert_eq!(substitute("${auth_player_name}", &vars), "Steve");
         assert_eq!(substitute("-Djava.library.path=${natives_directory}", &vars), "-Djava.library.path=${natives_directory}");
+    }
+
+    #[test]
+    fn classpath_entries_are_unique() {
+        let entries = unique_classpath_entries(vec![PathBuf::from("gson.jar"), PathBuf::from("gson.jar"), PathBuf::from("client.jar")]);
+        assert_eq!(entries, vec![PathBuf::from("gson.jar"), PathBuf::from("client.jar")]);
     }
 }

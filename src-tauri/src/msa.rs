@@ -33,7 +33,7 @@ use std::{
 /// access. Replace this before shipping login — see the module doc above.
 const MSA_CLIENT_ID: &str = "00000000-0000-0000-0000-000000000000";
 
-fn client_id_is_configured() -> bool {
+pub fn is_configured() -> bool {
     MSA_CLIENT_ID != "00000000-0000-0000-0000-000000000000"
 }
 
@@ -106,7 +106,7 @@ struct DeviceCodeResponse {
 }
 
 pub fn start_device_code(client: &Client) -> Result<DeviceCodeStart, MsaError> {
-    if !client_id_is_configured() {
+    if !is_configured() {
         return Err(MsaError::NotConfigured);
     }
     let response = client
@@ -187,7 +187,7 @@ pub fn poll_device_code(client: &Client, start: &DeviceCodeStart) -> Result<Micr
 }
 
 pub fn refresh_microsoft_tokens(client: &Client, refresh_token: &str) -> Result<MicrosoftTokens, MsaError> {
-    if !client_id_is_configured() {
+    if !is_configured() {
         return Err(MsaError::NotConfigured);
     }
     let response = client
@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn refuses_to_run_with_placeholder_client_id() {
-        assert!(!client_id_is_configured());
+        assert!(!is_configured());
         let client = Client::builder().build().unwrap();
         assert!(matches!(start_device_code(&client), Err(MsaError::NotConfigured)));
     }

@@ -88,7 +88,7 @@ impl From<io::Error> for NeoForgeError {
     }
 }
 
-fn is_allowed_host(url: &str) -> bool {
+pub(crate) fn is_allowed_host(url: &str) -> bool {
     Url::parse(url).ok().and_then(|parsed| parsed.host_str().map(|host| host == NEOFORGE_HOST)).unwrap_or(false)
 }
 

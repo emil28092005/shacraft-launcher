@@ -44,6 +44,13 @@ pub fn is_allowed_host(url: &str) -> bool {
     Url::parse(url).ok().and_then(|parsed| parsed.host_str().map(|host| MOJANG_HOSTS.contains(&host))).unwrap_or(false)
 }
 
+/// Library entries in a merged loader profile may point at the loader's
+/// own fixed Maven. The profile itself comes from the SHA-256-verified
+/// NeoForge installer, never from the ShaCraft manifest.
+fn is_allowed_library_host(url: &str) -> bool {
+    is_allowed_host(url) || crate::neoforge::is_allowed_host(url)
+}
+
 #[derive(Debug)]
 pub enum MojangError {
     Network(reqwest::Error),
@@ -430,7 +437,7 @@ pub fn ensure_libraries(client: &Client, game_dir: &Path, libraries: &[Library],
             checksum: Checksum::Sha1(artifact.sha1.clone()),
         });
     }
-    download_many(client, tasks, on_progress)?;
+    download_many(client, tasks, on_progress, is_allowed_library_host)?;
     Ok(paths)
 }
 
@@ -473,7 +480,7 @@ pub fn ensure_assets(client: &Client, game_dir: &Path, index: &AssetIndex, on_pr
             }
         })
         .collect();
-    download_many(client, tasks, on_progress)
+    download_many(client, tasks, on_progress, is_allowed_host)
 }
 
 struct DownloadTask {
@@ -509,7 +516,12 @@ fn download_with_retries(client: &Client, task: &DownloadTask) -> Result<u64, Do
 /// Downloads `tasks` using a small worker pool, calling `on_progress` with
 /// cumulative (downloaded, total) bytes as each file completes. Stops
 /// spawning new work once the first error is seen and returns it.
-fn download_many(client: &Client, tasks: Vec<DownloadTask>, on_progress: &ProgressCallback) -> Result<(), MojangError> {
+fn download_many(
+    client: &Client,
+    tasks: Vec<DownloadTask>,
+    on_progress: &ProgressCallback,
+    is_allowed: fn(&str) -> bool,
+) -> Result<(), MojangError> {
     let total: u64 = tasks.iter().map(|task| task.size).sum();
     if total == 0 {
         return Ok(());
@@ -529,7 +541,7 @@ fn download_many(client: &Client, tasks: Vec<DownloadTask>, on_progress: &Progre
                     break;
                 }
                 let Some(task) = queue.lock().unwrap().pop() else { break };
-                if !is_allowed_host(&task.url) {
+                if !is_allowed(&task.url) {
                     *first_error.lock().unwrap() = Some(MojangError::DisallowedHost(task.url));
                     continue;
                 }
@@ -648,6 +660,8 @@ mod tests {
     fn disallowed_host_is_rejected() {
         assert!(!is_allowed_host("https://example.com/evil.jar"));
         assert!(is_allowed_host("https://piston-data.mojang.com/v1/objects/x/client.jar"));
+        assert!(is_allowed_library_host("https://maven.neoforged.net/releases/net/neoforged/example.jar"));
+        assert!(!is_allowed_library_host("https://example.com/evil.jar"));
     }
 
     /// Live smoke test against the real Mojang CDN: manifest -> version JSON

@@ -33,10 +33,14 @@ real main class is `net.minecraftforge.installer.SimpleInstaller`, which
 supports this flag. **Empirically verified (2026-09-06)**: it refuses to
 target a directory unless a `launcher_profiles.json` stub already exists
 there ("you need to run the launcher first!") — `ensure_launcher_profiles_stub`
-writes a minimal one. It then fetches and patches vanilla itself; no
-pre-seeding needed. Its own downloads go straight to `maven.neoforged.net`/
-Mojang, outside our control — an accepted trust delegation to NeoForge's
-official tooling once the installer binary itself is verified.
+writes a minimal one. It fetches the inputs needed to patch vanilla, but does
+not guarantee that the complete vanilla runtime library set is present.
+After installation, `mojang::ensure_client_jar` and `ensure_libraries` always
+verify and download the complete merged launch set, including LWJGL and its
+platform natives. The installer's own downloads go straight to
+`maven.neoforged.net`/Mojang, outside our control — an accepted trust
+delegation to NeoForge's official tooling once the installer binary itself is
+verified.
 
 Also verified: the resulting
 `libraries/net/neoforged/neoforge/<ver>/neoforge-<ver>-client.jar` (the

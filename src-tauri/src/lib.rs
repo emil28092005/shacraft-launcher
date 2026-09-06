@@ -58,6 +58,13 @@ fn detect_java() -> Option<java::JavaInstallation> {
     java::detect()
 }
 
+/// Whether Microsoft sign-in was configured for this launcher build.
+/// The UI uses this to avoid advertising a login flow that cannot start.
+#[tauri::command]
+fn microsoft_login_available() -> bool {
+    msa::is_configured()
+}
+
 /// Validates an untrusted profile manifest before any file is downloaded.
 #[tauri::command]
 fn validate_manifest(manifest_json: String) -> Result<(), String> {
@@ -120,6 +127,15 @@ async fn sync_remote_profile(app: AppHandle, profile_id: String) -> Result<profi
         profile::sync(&data_dir.join("profiles").join(&manifest.id), &manifest)
             .map_err(|error| error.to_string())
     }).await.map_err(|error| format!("Profile synchronization task failed: {error}"))?
+}
+
+/// Gets live, read-only player count for a supported profile. Failure is
+/// surfaced to the interface, which displays the server as unavailable.
+#[tauri::command]
+async fn get_server_status(profile_id: String) -> Result<remote::ServerStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || remote::fetch_server_status(&profile_id).map_err(|error| error.to_string()))
+        .await
+        .map_err(|error| format!("Server-status task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -311,12 +327,12 @@ async fn ensure_game_installed(app: AppHandle, profile_id: String) -> Result<(),
         let java_install = java::ensure_java(&client, &runtime_root, manifest.minecraft.java_major, &stage_progress("java")).map_err(|error| error.to_string())?;
 
         let merged = resolve_merged_version(&client, &manifest, Path::new(&java_install.executable), &game_dir, &cache_dir, &stage_progress("neoforge"))?;
-        if manifest.minecraft.loader.kind != "neoforge" {
-            // Vanilla-only profiles skip the installer, which normally
-            // downloads vanilla itself; do it ourselves here instead.
-            mojang::ensure_client_jar(&client, &game_dir, &merged.client_jar_version_id, &merged.client).map_err(|error| error.to_string())?;
-            mojang::ensure_libraries(&client, &game_dir, &merged.libraries, &stage_progress("libraries")).map_err(|error| error.to_string())?;
-        };
+        // The NeoForge installer creates the loader profile and patched
+        // client, but it does not guarantee that every vanilla runtime
+        // library (notably LWJGL and its platform natives) is present.
+        // Verify the complete merged launch set for every loader kind.
+        mojang::ensure_client_jar(&client, &game_dir, &merged.client_jar_version_id, &merged.client).map_err(|error| error.to_string())?;
+        mojang::ensure_libraries(&client, &game_dir, &merged.libraries, &stage_progress("libraries")).map_err(|error| error.to_string())?;
 
         let asset_index = mojang::ensure_asset_index(&client, &game_dir, &merged.asset_index).map_err(|error| error.to_string())?;
         mojang::ensure_assets(&client, &game_dir, &asset_index, &stage_progress("assets")).map_err(|error| error.to_string())?;
@@ -391,11 +407,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             native_host,
             detect_java,
+            microsoft_login_available,
             validate_manifest,
             inspect_profile,
             sync_profile,
             inspect_remote_profile,
             sync_remote_profile,
+            get_server_status,
             load_settings,
             save_settings,
             start_microsoft_login,

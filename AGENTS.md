@@ -21,8 +21,11 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 
 ## Trust model
 
-- The only supported remote profile endpoint is
+- The only supported remote profile manifest endpoint is
   `https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest`.
+  The read-only Aeronautics player-count endpoint
+  `https://shacraft.ru/api/online/aoc` is also hardcoded in `remote.rs`; it
+  is display-only and is never allowed to influence downloads or launching.
 - The response is an Ed25519 envelope. `src-tauri/src/remote.rs` verifies its
   embedded public key and `keyId` **before** parsing the payload.
 - `src-tauri/src/manifest.rs` then validates paths, SHA-256, sizes, HTTPS and

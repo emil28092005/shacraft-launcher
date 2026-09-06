@@ -2,17 +2,15 @@ import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   ChevronRight,
   Download,
   FolderOpen,
   Gauge,
   Globe2,
-  Library,
   LogOut,
-  MessageCircle,
   Minus,
-  Newspaper,
   Play,
   RotateCcw,
   Settings,
@@ -30,12 +28,8 @@ type Server = {
   kicker: string
   name: string
   subtitle: string
-  players: string
   version: string
-  memory: string
-  installed: boolean
-  profileId?: string
-  disabled?: boolean
+  profileId: string
 }
 
 type NativeHost = {
@@ -86,6 +80,17 @@ type LoginResultPayload = {
   error?: string
 }
 
+type ServerStatus = {
+  online: number | null
+  max: number | null
+  reachable: boolean
+}
+
+type GameExitedPayload = {
+  profileId: string
+  exitCode: number | null
+}
+
 type InstallProgressPayload = {
   stage: 'java' | 'neoforge' | 'libraries' | 'assets'
   currentBytes: number
@@ -105,27 +110,19 @@ const servers: Server[] = [
     kicker: 'Основная сборка',
     name: 'Aeronautics',
     subtitle: 'Строй корабли. Поднимай города в небо.',
-    players: '7 / 20',
-    version: '1.21.1 · NeoForge',
-    memory: '6 ГБ',
-    installed: true,
+    version: '1.21.1 · NeoForge 21.1.248',
     profileId: 'aeronautics',
-  },
-  {
-    id: 'create',
-    kicker: 'На техобслуживании',
-    name: 'Create',
-    subtitle: 'Механизмы, фабрики и большие идеи.',
-    players: 'Сервер остановлен',
-    version: '1.21.1 · NeoForge',
-    memory: '4 ГБ',
-    installed: false,
-    disabled: true,
   },
 ]
 
 function isTauri() {
   return '__TAURI_INTERNALS__' in window
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (typeof error === 'string' && error.trim()) return error
+  if (error instanceof Error && error.message) return error.message
+  return fallback
 }
 
 function App() {
@@ -148,8 +145,11 @@ function App() {
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
   const [installing, setInstalling] = useState(false)
+  const [gameRunning, setGameRunning] = useState(false)
   const [installProgress, setInstallProgress] = useState<InstallProgressPayload | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
+  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
+  const [microsoftLoginAvailable, setMicrosoftLoginAvailable] = useState(false)
 
   useEffect(() => {
     if (progress === null) return
@@ -177,6 +177,9 @@ function App() {
     invoke<JavaInstallation | null>('detect_java')
       .then(setJava)
       .catch(() => setJava(null))
+    invoke<boolean>('microsoft_login_available')
+      .then(setMicrosoftLoginAvailable)
+      .catch(() => setMicrosoftLoginAvailable(false))
     invoke<ProfileInspection>('inspect_remote_profile', { profileId: 'aeronautics' })
       .then((inspection) => {
         setProfile(inspection)
@@ -187,6 +190,26 @@ function App() {
       .then(setAccount)
       .catch(() => setAccount(null))
   }, [])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let disposed = false
+    const refresh = () => {
+      invoke<ServerStatus>('get_server_status', { profileId: selected.profileId })
+        .then((status) => {
+          if (!disposed) setServerStatus(status)
+        })
+        .catch(() => {
+          if (!disposed) setServerStatus({ online: null, max: null, reachable: false })
+        })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [selected.profileId])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -203,7 +226,15 @@ function App() {
         }
       }),
       listen<InstallProgressPayload>('game-install-progress', (event) => setInstallProgress(event.payload)),
-      listen('game-exited', () => setInstalling(false)),
+      listen<GameExitedPayload>('game-exited', (event) => {
+        setInstalling(false)
+        setGameRunning(false)
+        setInstallProgress(null)
+        if (event.payload.exitCode !== 0) {
+          const suffix = event.payload.exitCode === null ? '' : ` (код ${event.payload.exitCode})`
+          setLaunchError(`Игра завершилась с ошибкой${suffix}. Подробности сохранены в журнале лаунчера.`)
+        }
+      }),
     ]
     return () => {
       unlisten.forEach((promise) => promise.then((off) => off()))
@@ -233,8 +264,7 @@ function App() {
   }
 
   const repair = async () => {
-    if (selected.disabled) return
-    if (isTauri() && selected.profileId) {
+    if (isTauri()) {
       setSyncError(null)
       setSyncing(true)
       setReady(false)
@@ -243,7 +273,7 @@ function App() {
         setProfile({ managedFiles: result.downloadedFiles + result.reusedFiles, missingFiles: 0, mismatchedFiles: 0, upToDate: true })
         setReady(true)
       } catch (error) {
-        setSyncError(error instanceof Error ? error.message : 'Не удалось синхронизировать сборку')
+        setSyncError(errorMessage(error, 'Не удалось синхронизировать сборку'))
       } finally {
         setSyncing(false)
       }
@@ -254,14 +284,17 @@ function App() {
   }
 
   const startLogin = async () => {
-    if (!isTauri()) return
+    if (!isTauri() || !microsoftLoginAvailable) {
+      setLoginError('Вход через Microsoft пока не настроен для этой версии лаунчера')
+      return
+    }
     setLoginError(null)
     setLoggingIn(true)
     try {
       await invoke('start_microsoft_login')
     } catch (error) {
       setLoggingIn(false)
-      setLoginError(error instanceof Error ? error.message : 'Не удалось начать вход через Microsoft')
+      setLoginError(errorMessage(error, 'Не удалось начать вход через Microsoft'))
     }
   }
 
@@ -272,7 +305,11 @@ function App() {
   }
 
   const playOrLogin = async () => {
-    if (selected.disabled || !isTauri() || !selected.profileId) return
+    if (!isTauri()) return
+    if (accountMode === 'microsoft' && !microsoftLoginAvailable) {
+      setLaunchError('Вход Microsoft пока недоступен. Выберите Offline-аккаунт в настройках.')
+      return
+    }
     // In offline mode we can launch without any Microsoft session. In
     // Microsoft mode a signed-in account is still required first.
     if (accountMode === 'microsoft' && (account === null || account === undefined)) {
@@ -280,51 +317,68 @@ function App() {
       return
     }
     setLaunchError(null)
-    setInstalling(true)
+    setSyncError(null)
+    setSyncing(true)
     setInstallProgress(null)
     try {
+      // A launch must always reconcile the signed ShaCraft profile first.
+      // Installing Minecraft/NeoForge alone produces a valid but unmodded
+      // game, so profile sync is deliberately part of the Play path.
+      const syncResult = await invoke<SyncResult>('sync_remote_profile', { profileId: selected.profileId })
+      setProfile({ managedFiles: syncResult.downloadedFiles + syncResult.reusedFiles, missingFiles: 0, mismatchedFiles: 0, upToDate: true })
+      setReady(true)
+      setSyncing(false)
+      setInstalling(true)
       await invoke('ensure_game_installed', { profileId: selected.profileId })
+      setInstallProgress(null)
+      setInstalling(false)
+      setGameRunning(true)
       await invoke('launch_game', { profileId: selected.profileId })
     } catch (error) {
-      setLaunchError(error instanceof Error ? error.message : 'Не удалось запустить игру')
+      setLaunchError(errorMessage(error, 'Не удалось запустить игру'))
+      setSyncing(false)
       setInstalling(false)
+      setGameRunning(false)
     }
   }
 
   const playLabel = () => {
-    if (selected.disabled) return 'Недоступно'
+    if (accountMode === 'microsoft' && !microsoftLoginAvailable) return 'Microsoft недоступен'
     if (accountMode === 'microsoft' && account === undefined) return 'Загрузка…'
     if (accountMode === 'microsoft' && account === null) return loggingIn ? 'Ждём вход…' : 'Войти через Microsoft'
+    if (gameRunning) return 'Игра запущена'
     if (installing) return installProgress ? `${INSTALL_STAGE_LABEL[installProgress.stage]}…` : 'Подготовка…'
     if (syncing || progress !== null) return 'Обновление'
     return ready ? 'Играть' : 'Проверить'
   }
 
   const installPercent = installProgress && installProgress.totalBytes > 0 ? Math.min(100, Math.round((installProgress.currentBytes / installProgress.totalBytes) * 100)) : null
+  const onlineLabel = serverStatus?.reachable && serverStatus.online !== null && serverStatus.max !== null
+    ? `${serverStatus.online} / ${serverStatus.max}`
+    : serverStatus === null ? 'Проверяем…' : 'Нет связи'
+
+  const minimizeWindow = () => { if (isTauri()) void getCurrentWindow().minimize() }
+  const toggleMaximizeWindow = () => { if (isTauri()) void getCurrentWindow().toggleMaximize() }
+  const closeWindow = () => { if (isTauri()) void getCurrentWindow().close() }
 
   return (
     <div className="app-shell">
-      <header className="titlebar">
-        <div className="brand">
-          <img src={logo} alt="" />
-          <span>ShaCraft</span>
+      <header className="titlebar" data-tauri-drag-region>
+        <div className="brand" data-tauri-drag-region>
+          <img src={logo} alt="" data-tauri-drag-region />
+          <span data-tauri-drag-region>ShaCraft</span>
         </div>
-        <div className="titlebar-drag">{nativeHost ? `Лаунчер · ${nativeHost.platform}` : 'Лаунчер'}</div>
+        <div className="titlebar-drag" data-tauri-drag-region>{nativeHost ? `Лаунчер · ${nativeHost.platform}` : 'Лаунчер'}</div>
         <div className="window-actions" aria-label="Управление окном">
-          <button aria-label="Свернуть"><Minus size={15} /></button>
-          <button aria-label="Развернуть"><Square size={12} /></button>
-          <button className="close" aria-label="Закрыть"><X size={15} /></button>
+          <button aria-label="Свернуть" onClick={minimizeWindow}><Minus size={15} /></button>
+          <button aria-label="Развернуть" onClick={toggleMaximizeWindow}><Square size={12} /></button>
+          <button className="close" aria-label="Закрыть" onClick={closeWindow}><X size={15} /></button>
         </div>
       </header>
 
       <div className="workspace">
-        <nav className="rail" aria-label="Основное меню">
-          <div className="rail-main">
-            <button className="rail-button active" aria-label="Сборки"><Library /></button>
-            <button className="rail-button" aria-label="Новости"><Newspaper /></button>
-            <button className="rail-button" aria-label="Сообщество"><MessageCircle /></button>
-          </div>
-          <button className="rail-button" aria-label="Настройки" onClick={() => setSettingsOpen(true)}>
+        <nav className="rail" aria-label="Настройки лаунчера">
+          <button className="rail-button active" aria-label="Настройки" onClick={() => setSettingsOpen(true)}>
             <Settings />
           </button>
         </nav>
@@ -341,7 +395,7 @@ function App() {
                 className={`server-row ${selected.id === server.id ? 'selected' : ''}`}
                 onClick={() => {
                   setSelected(server)
-                  setReady(server.installed)
+                  setReady(profile?.upToDate ?? false)
                   setProgress(null)
                 }}
               >
@@ -350,51 +404,49 @@ function App() {
                 </span>
                 <span className="server-copy">
                   <strong>{server.name}</strong>
-                  <small>{server.disabled ? 'На паузе' : 'Установлена'}</small>
+                  <small>{profile?.upToDate ? 'Файлы проверены' : 'Требуется проверка'}</small>
                 </span>
                 <ChevronRight size={16} />
               </button>
             ))}
           </div>
 
-          <div className="account-chip">
+          <button className="account-chip" onClick={() => setSettingsOpen(true)}>
             <span className="avatar">{accountMode === 'offline' ? nickname.slice(0, 2).toUpperCase() : (account ? account.name.slice(0, 2).toUpperCase() : '?')}</span>
             <span>
               <strong>{accountMode === 'offline' ? nickname : (account === undefined ? 'Проверяем…' : account === null ? 'Не авторизован' : account.name)}</strong>
               <small>{accountMode === 'offline' ? 'Offline-аккаунт' : (account ? 'Microsoft-аккаунт' : 'Войдите, чтобы играть')}</small>
             </span>
-            {accountMode === 'microsoft' && account ? (
-              <button aria-label="Выйти из аккаунта" onClick={logout} style={{ background: 'transparent', border: 0, cursor: 'pointer', color: 'inherit' }}>
-                <LogOut size={16} />
-              </button>
-            ) : (
-              <ChevronRight size={16} />
-            )}
-          </div>
+            <ChevronRight size={16} />
+          </button>
         </aside>
 
         <main className={`stage stage-${selected.id}`}>
           <div className="stage-top">
-            <div className={`live-pill ${selected.disabled ? 'offline' : ''}`}>
-              <span /> {selected.disabled ? 'Не в сети' : 'Сервер работает'}
+            <div className={`live-pill ${serverStatus === null || serverStatus.reachable ? '' : 'offline'}`}>
+              <span /> {serverStatus === null ? 'Проверяем сервер' : serverStatus.reachable ? 'Сервер доступен' : 'Сервер недоступен'}
             </div>
-            <div className="players"><Users size={16} /> {selected.players}</div>
+            <div className="players"><Users size={16} /> {onlineLabel}</div>
           </div>
 
           <section className="hero-copy">
-            <p>{selected.id === 'aoc' ? 'All of Create / сборка 2.5' : selected.kicker}</p>
+            <p>{selected.kicker}</p>
             <h1>{selected.name}</h1>
             <h2>{selected.subtitle}</h2>
             <dl className="hero-meta">
-              <div><dt>Состав</dt><dd>{selected.id === 'aoc' ? '250 модов' : '41 мод'}</dd></div>
-              <div><dt>Загрузчик</dt><dd>{selected.id === 'aoc' ? 'NeoForge 21.1.248' : 'NeoForge 21.1.249'}</dd></div>
+              <div><dt>Загрузчик</dt><dd>NeoForge 21.1.248</dd></div>
               <div><dt>Java</dt><dd>Версия 21</dd></div>
             </dl>
           </section>
 
           <section className="play-dock">
             <div className="build-state">
-              {installing ? (
+              {gameRunning ? (
+                <>
+                  <span className="state-icon"><Play size={19} /></span>
+                  <span><strong>Игра запущена</strong><small>Лаунчер готов к работе после выхода</small></span>
+                </>
+              ) : installing ? (
                 <>
                   <span className="state-icon downloading"><Download size={19} /></span>
                   <span>
@@ -415,17 +467,12 @@ function App() {
                     <small>Файлы и обновления · {progress}%</small>
                   </span>
                 </>
-              ) : selected.disabled ? (
-                <>
-                  <span className="state-icon muted"><Wrench size={19} /></span>
-                  <span><strong>Техобслуживание</strong><small>Сообщим, когда сервер вернётся</small></span>
-                </>
               ) : (
                 <>
                   <span className="state-icon"><ShieldCheck size={19} /></span>
                   <span>
-                    <strong>{accountMode === 'microsoft' && account === null ? 'Нужен вход' : ready ? 'Сборка готова' : 'Требуется проверка'}</strong>
-                    <small>{launchError || syncError || loginError || (profile ? `${profile.managedFiles} файлов под контролем` : 'Проверяем локальные файлы')}</small>
+                    <strong>{accountMode === 'microsoft' && !microsoftLoginAvailable ? 'Microsoft пока недоступен' : accountMode === 'microsoft' && account === null ? 'Нужен вход' : ready ? 'Файлы сборки готовы' : 'Требуется проверка'}</strong>
+                    <small>{launchError || syncError || loginError || (profile ? `${profile.managedFiles} файлов сборки` : 'Проверяем локальные файлы')}</small>
                   </span>
                 </>
               )}
@@ -438,12 +485,12 @@ function App() {
               <span><Gauge size={15} /> {ram} ГБ памяти</span>
             </div>
 
-            <button className="repair-button" onClick={repair} disabled={progress !== null || syncing || installing || selected.disabled} aria-label="Проверить файлы">
+            <button className="repair-button" onClick={repair} disabled={progress !== null || syncing || installing || gameRunning} aria-label="Проверить файлы">
               <RotateCcw size={19} />
             </button>
             <button
               className="play-button"
-              disabled={progress !== null || syncing || installing || selected.disabled || (accountMode === 'microsoft' && account === undefined) || loggingIn}
+              disabled={progress !== null || syncing || installing || gameRunning || (accountMode === 'microsoft' && (account === undefined || !microsoftLoginAvailable)) || loggingIn}
               onClick={playOrLogin}
             >
               <Play size={21} fill="currentColor" />
@@ -476,7 +523,7 @@ function App() {
         </label>
         <div className="setting-row static">
           <span><Users />Аккаунт</span>
-          <small>{accountMode === 'offline' ? 'Offline' : (account ? account.name : 'Не авторизован')}</small>
+          <small>{accountMode === 'offline' ? 'Offline' : (microsoftLoginAvailable ? (account ? account.name : 'Не авторизован') : 'Временно недоступен')}</small>
         </div>
         {accountMode === 'offline' && (
           <label className="text-setting">
@@ -493,7 +540,7 @@ function App() {
             style={{ background: 'transparent', border: 0, color: 'inherit', textAlign: 'right' }}
           >
             <option value="offline">Offline</option>
-            <option value="microsoft">Microsoft</option>
+            <option value="microsoft" disabled={!microsoftLoginAvailable}>Microsoft (скоро)</option>
           </select>
         </div>
         {accountMode === 'microsoft' && account && (
@@ -501,7 +548,7 @@ function App() {
             <span><LogOut />Выйти из Microsoft</span>
           </button>
         )}
-        {accountMode === 'microsoft' && !account && (
+        {accountMode === 'microsoft' && !account && microsoftLoginAvailable && (
           <button className="setting-row" onClick={startLogin}>
             <span><LogOut />Войти через Microsoft</span>
           </button>
@@ -522,7 +569,6 @@ function App() {
                   : 'Лаунчер установит Java 21 автоматически'}
           </small>
         </div>
-        <button className="setting-row"><span><Wrench />Дополнительные параметры</span><ChevronRight /></button>
         <div className="drawer-note">
           {nativeHost ? `Данные лаунчера: ${nativeHost.dataDir}` : 'Java 21 будет управляться лаунчером автоматически.'}
         </div>

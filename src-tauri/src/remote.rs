@@ -2,11 +2,12 @@ use crate::manifest::{self, Manifest};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::{blocking::Client, redirect::Policy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 
 const AERONAUTICS_MANIFEST: &str =
     "https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest";
+const AERONAUTICS_ONLINE: &str = "https://shacraft.ru/api/online/aoc";
 const MANIFEST_PUBLIC_KEY: &str = "2S3FRdZj4Xw5nJpZ3IhqVITBg3nTH9AtGSo1Ew9+qVQ=";
 
 #[derive(Deserialize)]
@@ -16,6 +17,16 @@ struct SignedManifest {
     key_id: String,
     payload: String,
     signature: String,
+}
+
+/// Read-only player count for the profile currently supported by the launcher.
+/// This URL is deliberately fixed here rather than supplied by a manifest.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatus {
+    pub online: Option<u32>,
+    pub max: Option<u32>,
+    pub reachable: bool,
 }
 
 #[derive(Debug)]
@@ -73,4 +84,21 @@ pub fn fetch_manifest(profile_id: &str) -> Result<Manifest, RemoteError> {
     public_key.verify(&payload, &signature).map_err(|_| RemoteError::InvalidSignature)?;
     let payload = String::from_utf8(payload).map_err(|_| RemoteError::InvalidSignature)?;
     manifest::validate_json(&payload).map_err(RemoteError::InvalidManifest)
+}
+
+pub fn fetch_server_status(profile_id: &str) -> Result<ServerStatus, RemoteError> {
+    let url = match profile_id {
+        "aeronautics" => AERONAUTICS_ONLINE,
+        _ => return Err(RemoteError::UnknownProfile),
+    };
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(Policy::none())
+        .build()
+        .map_err(RemoteError::Network)?;
+    let response = client.get(url).send().map_err(RemoteError::Network)?;
+    if !response.status().is_success() {
+        return Err(RemoteError::Status(response.status()));
+    }
+    response.json::<ServerStatus>().map_err(RemoteError::Network)
 }

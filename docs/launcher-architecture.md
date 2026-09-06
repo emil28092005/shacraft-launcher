@@ -9,6 +9,10 @@ launch either with a real Microsoft account or with a local offline profile
 (nickname + deterministic offline UUID) — see `docs/game-trust-boundary.md`
 and `AGENTS.md`'s trust model section.
 
+The interface also shows a live Aeronautics player count from the fixed,
+read-only `https://shacraft.ru/api/online/aoc` endpoint. It is display-only:
+the result never controls files, versions, URLs, or the launch command.
+
 Not yet implemented: a user-selectable profile directory, a "reset managed
 files only" recovery action, and signed cross-platform release builds of the
 launcher itself. Do not represent these as completed in UI or release notes.
@@ -28,6 +32,7 @@ Game itself (never controlled by the manifest above)
   -> Java 21 via Adoptium if none installed (runtime.rs)
   -> NeoForge's own installer, run headlessly (neoforge.rs)
   -> generic inheritsFrom merge of the two version JSONs (mojang.rs)
+  -> SHA-1-verified merged libraries + platform natives (mojang.rs)
   -> real Microsoft/Xbox/Minecraft Services login (msa.rs)
   -> java process spawned with the merged classpath/args (launch.rs)
 ```
