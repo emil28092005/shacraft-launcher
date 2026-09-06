@@ -13,9 +13,6 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 
 ## Non-negotiable boundaries
 
-- Do not implement licence bypasses, fake Minecraft access tokens, or download
-  or redistribute Minecraft game assets. Keep game authentication/launching
-  separate from modpack management.
 - Launcher-managed payload is limited to ShaCraft-owned configuration and
   approved modpack files. Never make arbitrary URLs, shell commands, or local
   paths controllable by a remote manifest.
@@ -32,15 +29,47 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   allowed ShaCraft hosts. Do not weaken this whitelist.
 - `src-tauri/src/profile.rs` downloads to a temporary sibling file, verifies
   size + SHA-256, and atomically replaces only launcher-managed files.
+- This ShaCraft manifest is the **only** source of truth for which
+  Minecraft version / NeoForge version / Java major a profile needs
+  (`Manifest.minecraft`) and for mod/config files. It never supplies a URL
+  for the game itself — see `docs/game-trust-boundary.md` for the four
+  independent, hardcoded-host trust domains (Mojang, NeoForge, Microsoft,
+  Adoptium) that install and run the actual game. Do not let manifest data
+  control a URL in any of those domains.
+- Account modes: the launcher supports launching as either a genuine
+  Microsoft account that owns Minecraft Java Edition (`src-tauri/src/msa.rs`,
+  device-code OAuth -> Xbox Live -> XSTS -> Minecraft Services) or as a local
+  offline profile (nickname + deterministic offline UUID, see
+  `src-tauri/src/session.rs`). The mode is an explicit player choice
+  (`account_mode` in settings); offline is never silently substituted for a
+  Microsoft session. The mc-aoc/mc-create servers' own `ONLINE_MODE=FALSE` +
+  whitelist + Login System are a separate, independent access-control layer
+  on the server side.
 
 ## Layout
 
 - `src/main.tsx` — UI state and Tauri command calls; do not put privileged
   operations in the web layer.
 - `src-tauri/src/` — native commands and security-sensitive logic.
+  - `download.rs` — shared verified-download helper (temp file, hash,
+    atomic rename, progress callback); `manifest.rs`/`profile.rs` (ShaCraft
+    mods) and `mojang.rs`/`neoforge.rs`/`runtime.rs` (the game itself) all
+    build on this rather than each rolling their own.
+  - `mojang.rs` — vanilla Minecraft trust boundary + the generic
+    `inheritsFrom` version-JSON merge (shared with NeoForge's profile).
+  - `neoforge.rs` — runs NeoForge's official installer headlessly.
+  - `runtime.rs` — Java 21 auto-provisioning via Eclipse Adoptium.
+  - `msa.rs` — Microsoft/Xbox/Minecraft Services login; see
+    `MSA_CLIENT_ID`'s doc comment before touching login — it is currently a
+    placeholder pending ShaCraft's own Azure AD app registration and
+    Minecraft-API approval.
+  - `launch.rs` — builds and spawns the actual `java` process.
 - `src-tauri/src/settings.rs` — durable local preferences; maintain backward
   compatibility with already-written JSON.
-- `docs/manifest-v1.md` — signed manifest envelope and payload contract.
+- `docs/manifest-v1.md` — signed manifest envelope and payload contract
+  (mods/config only).
+- `docs/game-trust-boundary.md` — the Mojang/NeoForge/Microsoft/Adoptium
+  trust domains used to install and run the game itself.
 - `.github/workflows/build.yml` — manual cross-platform build matrix.
 
 ## Verification

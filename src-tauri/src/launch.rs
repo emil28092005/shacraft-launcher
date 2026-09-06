@@ -1,0 +1,206 @@
+//! Builds and spawns the real `java` invocation for a merged launch
+//! profile. The `${auth_*}` placeholders are filled from a `PlayerIdentity`,
+//! which is either a real Microsoft-authenticated session (`msa::LoginResult`)
+//! or an explicit offline account (`PlayerIdentity::Offline`). Offline mode is
+//! never silently substituted for a Microsoft session.
+
+use crate::mojang::{self, MergedVersion};
+use crate::session::PlayerIdentity;
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashMap,
+    fmt, fs, io,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Debug)]
+pub enum LaunchError {
+    Io(io::Error),
+}
+
+impl fmt::Display for LaunchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "cannot launch Minecraft: {error}"),
+        }
+    }
+}
+
+impl From<io::Error> for LaunchError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+pub struct LaunchRequest<'a> {
+    pub java_executable: &'a Path,
+    /// Shared vanilla+NeoForge files: versions/, libraries/, assets/.
+    pub game_dir: &'a Path,
+    /// ShaCraft-managed mods/config for this profile; becomes `--gameDir`
+    /// so worlds/screenshots/config the player creates land there, not in
+    /// the shared `game_dir`.
+    pub profile_dir: &'a Path,
+    pub merged: &'a MergedVersion,
+    pub identity: &'a PlayerIdentity,
+    pub memory_mb: u16,
+    pub log_path: &'a Path,
+}
+
+fn classpath_separator() -> &'static str {
+    if cfg!(target_os = "windows") {
+        ";"
+    } else {
+        ":"
+    }
+}
+
+fn build_classpath(game_dir: &Path, merged: &MergedVersion, client_jar: &Path) -> String {
+    let no_features = HashMap::new();
+    let mut entries: Vec<PathBuf> = merged
+        .libraries
+        .iter()
+        .filter(|library| mojang::rule_allows(&library.rules, &no_features))
+        .filter_map(|library| library.downloads.as_ref().and_then(|downloads| downloads.artifact.as_ref()))
+        .map(|artifact| game_dir.join("libraries").join(&artifact.path))
+        .collect();
+    entries.push(client_jar.to_path_buf());
+    entries.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(classpath_separator())
+}
+
+/// A persistent-but-not-security-sensitive per-install identifier for the
+/// `${clientid}` launch argument (Microsoft telemetry only, unrelated to
+/// auth). Deliberately avoids adding a `uuid`/`rand` dependency for this:
+/// it's hashed from time/process entropy via the `sha2` we already depend
+/// on, formatted as a version-4-shaped UUID.
+fn launcher_client_id(game_dir: &Path) -> Result<String, LaunchError> {
+    let path = game_dir.join(".shacraft-client-id");
+    if let Ok(existing) = fs::read_to_string(&path) {
+        let trimmed = existing.trim();
+        if trimmed.len() == 36 {
+            return Ok(trimmed.to_string());
+        }
+    }
+    fs::create_dir_all(game_dir)?;
+    let generated = random_uuid_v4();
+    fs::write(&path, &generated)?;
+    Ok(generated)
+}
+
+static UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn random_uuid_v4() -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_le_bytes());
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(UUID_COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes());
+    let stack_marker = 0_u8;
+    hasher.update((&stack_marker as *const u8 as usize).to_le_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[0..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+    let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    crate::session::format_uuid_with_dashes(&hex)
+}
+
+fn substitute(template: &str, vars: &HashMap<&str, String>) -> String {
+    let mut result = template.to_string();
+    for (key, value) in vars {
+        let token = format!("${{{key}}}");
+        if result.contains(&token) {
+            result = result.replace(&token, value);
+        }
+    }
+    result
+}
+
+/// Builds the full `java` command line for `request.merged` and spawns it
+/// detached, with stdout/stderr both redirected to `request.log_path`.
+/// Never blocks on the child exiting — the caller decides how to observe
+/// that (see `lib.rs`'s launch command, which watches it on a background
+/// thread and emits an event).
+pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
+    fs::create_dir_all(request.profile_dir)?;
+    let natives_dir = mojang::natives_directory(request.game_dir, &request.merged.id);
+    fs::create_dir_all(&natives_dir)?;
+    let assets_root = request.game_dir.join("assets");
+    let libraries_dir = request.game_dir.join("libraries");
+    let client_jar = mojang::client_jar_path(request.game_dir, &request.merged.client_jar_version_id);
+    let classpath = build_classpath(request.game_dir, request.merged, &client_jar);
+
+    let mut vars: HashMap<&str, String> = HashMap::new();
+    vars.insert("auth_player_name", request.identity.name().to_string());
+    vars.insert("version_name", request.merged.id.clone());
+    vars.insert("game_directory", request.profile_dir.display().to_string());
+    vars.insert("assets_root", assets_root.display().to_string());
+    vars.insert("assets_index_name", request.merged.asset_index.id.clone());
+    vars.insert("auth_uuid", request.identity.uuid());
+    vars.insert("auth_access_token", request.identity.access_token().to_string());
+    vars.insert("clientid", launcher_client_id(request.game_dir)?);
+    vars.insert("auth_xuid", request.identity.xuid().to_string());
+    vars.insert("user_type", request.identity.user_type().to_string());
+    vars.insert("version_type", "ShaCraft Launcher".to_string());
+    vars.insert("natives_directory", natives_dir.display().to_string());
+    vars.insert("launcher_name", "ShaCraft Launcher".to_string());
+    vars.insert("launcher_version", env!("CARGO_PKG_VERSION").to_string());
+    vars.insert("classpath", classpath);
+    vars.insert("library_directory", libraries_dir.display().to_string());
+    vars.insert("classpath_separator", classpath_separator().to_string());
+
+    let no_features = HashMap::new();
+    let jvm_args = mojang::resolve_arguments(&request.merged.jvm_arguments, &no_features);
+    let game_args = mojang::resolve_arguments(&request.merged.game_arguments, &no_features);
+
+    let mut command = Command::new(request.java_executable);
+    command.arg(format!("-Xmx{}M", request.memory_mb));
+    for argument in jvm_args {
+        command.arg(substitute(&argument, &vars));
+    }
+    command.arg(&request.merged.main_class);
+    for argument in game_args {
+        command.arg(substitute(&argument, &vars));
+    }
+    command.current_dir(request.profile_dir);
+
+    let log_file = fs::File::create(request.log_path)?;
+    command.stdout(Stdio::from(log_file.try_clone()?));
+    command.stderr(Stdio::from(log_file));
+
+    Ok(command.spawn()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generates_rfc4122_version_4_uuids() {
+        let id = random_uuid_v4();
+        let parts: Vec<&str> = id.split('-').collect();
+        assert_eq!(parts.len(), 5);
+        assert_eq!(parts[2].chars().next().unwrap(), '4');
+        assert!(matches!(parts[3].chars().next().unwrap(), '8' | '9' | 'a' | 'b'));
+    }
+
+    #[test]
+    fn client_id_is_persisted_across_calls() {
+        let dir = std::env::temp_dir().join(format!("shacraft-launch-clientid-test-{}", std::process::id()));
+        let first = launcher_client_id(&dir).unwrap();
+        let second = launcher_client_id(&dir).unwrap();
+        assert_eq!(first, second);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn substitutes_known_tokens_only() {
+        let mut vars = HashMap::new();
+        vars.insert("auth_player_name", "Steve".to_string());
+        assert_eq!(substitute("--username", &vars), "--username");
+        assert_eq!(substitute("${auth_player_name}", &vars), "Steve");
+        assert_eq!(substitute("-Djava.library.path=${natives_directory}", &vars), "-Djava.library.path=${natives_directory}");
+    }
+}

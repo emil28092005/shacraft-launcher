@@ -7,12 +7,29 @@ const MAX_MEMORY_MB: u16 = 12 * 1024;
 const DEFAULT_MEMORY_MB: u16 = 6 * 1024;
 const DEFAULT_NICKNAME: &str = "Emil";
 
+/// Which account the player launches as. `Microsoft` requires a real signed-in
+/// session; `Offline` uses the local nickname (no Microsoft account needed).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountMode {
+    Microsoft,
+    Offline,
+}
+
+impl Default for AccountMode {
+    fn default() -> Self {
+        Self::Offline
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LauncherSettings {
     pub memory_mb: u16,
     #[serde(default = "default_nickname")]
     pub nickname: String,
+    #[serde(default)]
+    pub account_mode: AccountMode,
 }
 
 fn default_nickname() -> String {
@@ -21,7 +38,7 @@ fn default_nickname() -> String {
 
 impl Default for LauncherSettings {
     fn default() -> Self {
-        Self { memory_mb: DEFAULT_MEMORY_MB, nickname: DEFAULT_NICKNAME.into() }
+        Self { memory_mb: DEFAULT_MEMORY_MB, nickname: DEFAULT_NICKNAME.into(), account_mode: AccountMode::Offline }
     }
 }
 
@@ -80,7 +97,7 @@ fn validate(settings: &LauncherSettings) -> Result<(), SettingsError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load, save, LauncherSettings};
+    use super::{load, save, AccountMode, LauncherSettings};
     use std::{fs, process, time::{SystemTime, UNIX_EPOCH}};
 
     fn temporary_directory() -> std::path::PathBuf {
@@ -94,11 +111,14 @@ mod tests {
     #[test]
     fn defaults_then_persists_memory() {
         let directory = temporary_directory();
-        assert_eq!(load(&directory).unwrap().memory_mb, 6 * 1024);
+        let default = load(&directory).unwrap();
+        assert_eq!(default.memory_mb, 6 * 1024);
+        assert_eq!(default.nickname, "Emil");
+        assert_eq!(default.account_mode, AccountMode::Offline);
 
-        let saved = save(&directory, LauncherSettings { memory_mb: 8 * 1024, nickname: "Emil".into() }).unwrap();
+        let saved = save(&directory, LauncherSettings { memory_mb: 8 * 1024, nickname: "Emil".into(), account_mode: AccountMode::Microsoft }).unwrap();
         assert_eq!(saved.memory_mb, 8 * 1024);
-        assert_eq!(load(&directory).unwrap().memory_mb, 8 * 1024);
+        assert_eq!(load(&directory).unwrap().account_mode, AccountMode::Microsoft);
 
         fs::remove_dir_all(directory).unwrap();
     }
@@ -106,7 +126,18 @@ mod tests {
     #[test]
     fn rejects_unsafe_memory_values() {
         let directory = temporary_directory();
-        assert!(save(&directory, LauncherSettings { memory_mb: 512, nickname: "Emil".into() }).is_err());
-        assert!(save(&directory, LauncherSettings { memory_mb: 6 * 1024, nickname: "невалидный".into() }).is_err());
+        assert!(save(&directory, LauncherSettings { memory_mb: 512, nickname: "Emil".into(), account_mode: AccountMode::Offline }).is_err());
+        assert!(save(&directory, LauncherSettings { memory_mb: 6 * 1024, nickname: "невалидный".into(), account_mode: AccountMode::Offline }).is_err());
+    }
+
+    #[test]
+    fn old_settings_without_nickname_defaults_gracefully() {
+        let directory = temporary_directory();
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("settings.json"), r#"{"memoryMb": 6144}"#).unwrap();
+        let settings = load(&directory).unwrap();
+        assert_eq!(settings.memory_mb, 6 * 1024);
+        assert_eq!(settings.nickname, "Emil");
+        fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -152,6 +152,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--green); out
 .text-setting input:focus { border-color: var(--accent); }
 .drawer-note { position: absolute; left: 28px; right: 28px; bottom: 26px; padding: 13px 15px; background: #17231a; color: #8fb193; border-radius: 10px; font-size: 10px; }
 
+.login-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 22; width: 360px; background: #121713; border: 1px solid var(--line); border-radius: 14px; padding: 26px; text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+.login-modal h2 { margin: 0 0 10px; font-family: 'Unbounded'; font-size: 18px; }
+.login-modal p { margin: 0 0 16px; color: #aeb7af; font-size: 12px; line-height: 1.5; }
+.login-code { font-family: 'Unbounded'; font-size: 28px; letter-spacing: .08em; color: var(--green); background: #191f1a; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.login-url { color: var(--ice) !important; font-size: 11px !important; word-break: break-all; }
+
 @media (max-width: 1160px) {
   .workspace { grid-template-columns: 58px 224px 1fr; }
   .brand { width: 240px; }
