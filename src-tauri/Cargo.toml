@@ -3,6 +3,7 @@ name = "shacraft-launcher"
 version = "0.1.0"
 description = "ShaCraft Minecraft launcher"
 authors = ["ShaCraft"]
+license = "MIT"
 edition = "2021"
 
 [lib]
