@@ -73,12 +73,19 @@ pub fn file_hashes(path: &Path) -> io::Result<(String, String)> {
         sha1.update(&buffer[..read]);
         sha256.update(&buffer[..read]);
     }
-    Ok((format!("{:x}", sha1.finalize()), format!("{:x}", sha256.finalize())))
+    Ok((
+        format!("{:x}", sha1.finalize()),
+        format!("{:x}", sha256.finalize()),
+    ))
 }
 
 /// True if `path` already exists, matches `expected_size` (when given) and
 /// `checksum`. Used to skip re-downloading files that are already current.
-pub fn is_current(path: &Path, expected_size: Option<u64>, checksum: &Checksum) -> io::Result<bool> {
+pub fn is_current(
+    path: &Path,
+    expected_size: Option<u64>,
+    checksum: &Checksum,
+) -> io::Result<bool> {
     let metadata = match path.metadata() {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -104,6 +111,42 @@ fn temp_path(target: &Path) -> Result<PathBuf, DownloadError> {
     Ok(target.with_file_name(format!(".{file_name}.shacraft.part")))
 }
 
+/// Replaces `target` with a fully-written temporary sibling. Unix rename
+/// replaces an existing file atomically, while Windows rename rejects an
+/// existing destination. The backup dance keeps the old file recoverable if
+/// the second rename fails (for example because antivirus briefly locks it).
+pub(crate) fn replace_file(temporary: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        fs::rename(temporary, target)
+    }
+    #[cfg(windows)]
+    {
+        if !target.exists() {
+            return fs::rename(temporary, target);
+        }
+        let file_name = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "target has no valid filename")
+            })?;
+        let backup = target.with_file_name(format!(".{file_name}.shacraft.backup"));
+        match fs::remove_file(&backup) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        fs::rename(target, &backup)?;
+        if let Err(error) = fs::rename(temporary, target) {
+            let _ = fs::rename(&backup, target);
+            return Err(error);
+        }
+        let _ = fs::remove_file(backup);
+        Ok(())
+    }
+}
+
 /// Downloads `url` to `target`, verifying size (if known ahead of time) and
 /// `checksum` before atomically renaming the temporary file into place.
 /// `on_progress(downloaded_bytes, total_bytes)` is called after every chunk;
@@ -126,18 +169,28 @@ pub fn download_verified(
     let total = expected_size.or_else(|| response.content_length());
     if let (Some(expected), Some(length)) = (expected_size, response.content_length()) {
         if expected != length {
-            return Err(DownloadError::SizeMismatch { expected, actual: length });
+            return Err(DownloadError::SizeMismatch {
+                expected,
+                actual: length,
+            });
         }
     }
 
     let temporary = temp_path(target)?;
-    let result = write_and_verify(&mut response, &temporary, expected_size, checksum, total, &mut on_progress);
+    let result = write_and_verify(
+        &mut response,
+        &temporary,
+        expected_size,
+        checksum,
+        total,
+        &mut on_progress,
+    );
     if let Err(error) = result {
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
     let bytes = result.unwrap();
-    fs::rename(&temporary, target).map_err(DownloadError::Io)?;
+    replace_file(&temporary, target).map_err(DownloadError::Io)?;
     Ok(bytes)
 }
 
@@ -160,7 +213,9 @@ fn write_and_verify(
         if read == 0 {
             break;
         }
-        output.write_all(&buffer[..read]).map_err(DownloadError::Io)?;
+        output
+            .write_all(&buffer[..read])
+            .map_err(DownloadError::Io)?;
         sha1.update(&buffer[..read]);
         sha256.update(&buffer[..read]);
         bytes += read as u64;
@@ -170,7 +225,10 @@ fn write_and_verify(
 
     if let Some(expected) = expected_size {
         if bytes != expected {
-            return Err(DownloadError::SizeMismatch { expected, actual: bytes });
+            return Err(DownloadError::SizeMismatch {
+                expected,
+                actual: bytes,
+            });
         }
     }
     let sha1_hex = format!("{:x}", sha1.finalize());
@@ -183,14 +241,20 @@ fn write_and_verify(
 
 #[cfg(test)]
 mod tests {
-    use super::{file_hashes, is_current, Checksum};
-    use std::{fs, process, time::{SystemTime, UNIX_EPOCH}};
+    use super::{file_hashes, is_current, replace_file, Checksum};
+    use std::{
+        fs, process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_file(contents: &[u8]) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
             "shacraft-download-test-{}-{}",
             process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::write(&path, contents).unwrap();
         path
@@ -201,7 +265,10 @@ mod tests {
         let path = temp_file(b"hello shacraft");
         let (sha1_hex, sha256_hex) = file_hashes(&path).unwrap();
         assert_eq!(sha1_hex, "124b319646ec08b4fb2a2b65bbd21c0431b4eaf4");
-        assert_eq!(sha256_hex, "d34eb8ea6396e8492109813c717f7eefd0437c10ff55a7b11949cfae900c946d");
+        assert_eq!(
+            sha256_hex,
+            "d34eb8ea6396e8492109813c717f7eefd0437c10ff55a7b11949cfae900c946d"
+        );
         fs::remove_file(path).unwrap();
     }
 
@@ -219,5 +286,16 @@ mod tests {
     fn is_current_false_for_missing_file() {
         let path = std::env::temp_dir().join("shacraft-download-test-missing-file-xyz");
         assert!(!is_current(&path, None, &Checksum::Sha256("0".repeat(64))).unwrap());
+    }
+
+    #[test]
+    fn replaces_an_existing_file() {
+        let target = temp_file(b"old");
+        let temporary = target.with_extension("replacement");
+        fs::write(&temporary, b"new").unwrap();
+        replace_file(&temporary, &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert!(!temporary.exists());
+        fs::remove_file(target).unwrap();
     }
 }

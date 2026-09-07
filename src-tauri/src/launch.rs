@@ -69,7 +69,12 @@ fn build_classpath(game_dir: &Path, merged: &MergedVersion, client_jar: &Path) -
         .libraries
         .iter()
         .filter(|library| mojang::rule_allows(&library.rules, &no_features))
-        .filter_map(|library| library.downloads.as_ref().and_then(|downloads| downloads.artifact.as_ref()))
+        .filter_map(|library| {
+            library
+                .downloads
+                .as_ref()
+                .and_then(|downloads| downloads.artifact.as_ref())
+        })
         .map(|artifact| game_dir.join("libraries").join(&artifact.path))
         .collect();
     entries.push(client_jar.to_path_buf());
@@ -78,7 +83,11 @@ fn build_classpath(game_dir: &Path, merged: &MergedVersion, client_jar: &Path) -
     // (for example on gson-2.10.1.jar), so preserve order and keep each path
     // only once.
     let entries = unique_classpath_entries(entries);
-    entries.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(classpath_separator())
+    entries
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(classpath_separator())
 }
 
 /// A persistent-but-not-security-sensitive per-install identifier for the
@@ -104,7 +113,13 @@ static UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn random_uuid_v4() -> String {
     let mut hasher = Sha256::new();
-    hasher.update(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_le_bytes());
+    hasher.update(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_le_bytes(),
+    );
     hasher.update(std::process::id().to_le_bytes());
     hasher.update(UUID_COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes());
     let stack_marker = 0_u8;
@@ -114,7 +129,10 @@ fn random_uuid_v4() -> String {
     bytes.copy_from_slice(&digest[0..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
     bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
-    let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let hex = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     crate::session::format_uuid_with_dashes(&hex)
 }
 
@@ -129,6 +147,36 @@ fn substitute(template: &str, vars: &HashMap<&str, String>) -> String {
     result
 }
 
+/// Java's argument-file syntax is independent of the platform shell. Keeping
+/// the large JVM/module/classpath portion in an argfile avoids Windows'
+/// 32,767 UTF-16 command-line limit while leaving account tokens out of it.
+fn quote_argfile_argument(argument: &str) -> String {
+    let mut quoted = String::with_capacity(argument.len() + 2);
+    quoted.push('"');
+    for character in argument.chars() {
+        match character {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn write_jvm_argfile(path: &Path, arguments: &[String]) -> io::Result<()> {
+    let mut contents = arguments
+        .iter()
+        .map(|argument| quote_argfile_argument(argument))
+        .collect::<Vec<_>>()
+        .join("\n");
+    contents.push('\n');
+    fs::write(path, contents)
+}
+
 /// Builds the full `java` command line for `request.merged` and spawns it
 /// detached, with stdout/stderr both redirected to `request.log_path`.
 /// Never blocks on the child exiting — the caller decides how to observe
@@ -140,7 +188,8 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     fs::create_dir_all(&natives_dir)?;
     let assets_root = request.game_dir.join("assets");
     let libraries_dir = request.game_dir.join("libraries");
-    let client_jar = mojang::client_jar_path(request.game_dir, &request.merged.client_jar_version_id);
+    let client_jar =
+        mojang::client_jar_path(request.game_dir, &request.merged.client_jar_version_id);
     let classpath = build_classpath(request.game_dir, request.merged, &client_jar);
 
     let mut vars: HashMap<&str, String> = HashMap::new();
@@ -155,7 +204,10 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     vars.insert("assets_root", assets_root.display().to_string());
     vars.insert("assets_index_name", request.merged.asset_index.id.clone());
     vars.insert("auth_uuid", request.identity.uuid());
-    vars.insert("auth_access_token", request.identity.access_token().to_string());
+    vars.insert(
+        "auth_access_token",
+        request.identity.access_token().to_string(),
+    );
     vars.insert("clientid", launcher_client_id(request.game_dir)?);
     vars.insert("auth_xuid", request.identity.xuid().to_string());
     vars.insert("user_type", request.identity.user_type().to_string());
@@ -168,13 +220,24 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     vars.insert("classpath_separator", classpath_separator().to_string());
 
     let no_features = HashMap::new();
-    let jvm_args = mojang::resolve_arguments(&request.merged.jvm_arguments, &no_features);
+    let jvm_args = mojang::resolve_arguments(&request.merged.jvm_arguments, &no_features)
+        .into_iter()
+        .map(|argument| substitute(&argument, &vars))
+        .collect::<Vec<_>>();
     let game_args = mojang::resolve_arguments(&request.merged.game_arguments, &no_features);
 
     let mut command = Command::new(request.java_executable);
-    command.arg(format!("-Xmx{}M", request.memory_mb));
-    for argument in jvm_args {
-        command.arg(substitute(&argument, &vars));
+    let memory_argument = format!("-Xmx{}M", request.memory_mb);
+    if cfg!(windows) {
+        let argfile = request.profile_dir.join(".shacraft-jvm.args");
+        let mut argfile_arguments = Vec::with_capacity(jvm_args.len() + 1);
+        argfile_arguments.push(memory_argument);
+        argfile_arguments.extend(jvm_args);
+        write_jvm_argfile(&argfile, &argfile_arguments)?;
+        command.arg(format!("@{}", argfile.display()));
+    } else {
+        command.arg(memory_argument);
+        command.args(jvm_args);
     }
     command.arg(&request.merged.main_class);
     for argument in game_args {
@@ -199,12 +262,18 @@ mod tests {
         let parts: Vec<&str> = id.split('-').collect();
         assert_eq!(parts.len(), 5);
         assert_eq!(parts[2].chars().next().unwrap(), '4');
-        assert!(matches!(parts[3].chars().next().unwrap(), '8' | '9' | 'a' | 'b'));
+        assert!(matches!(
+            parts[3].chars().next().unwrap(),
+            '8' | '9' | 'a' | 'b'
+        ));
     }
 
     #[test]
     fn client_id_is_persisted_across_calls() {
-        let dir = std::env::temp_dir().join(format!("shacraft-launch-clientid-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "shacraft-launch-clientid-test-{}",
+            std::process::id()
+        ));
         let first = launcher_client_id(&dir).unwrap();
         let second = launcher_client_id(&dir).unwrap();
         assert_eq!(first, second);
@@ -217,12 +286,34 @@ mod tests {
         vars.insert("auth_player_name", "Steve".to_string());
         assert_eq!(substitute("--username", &vars), "--username");
         assert_eq!(substitute("${auth_player_name}", &vars), "Steve");
-        assert_eq!(substitute("-Djava.library.path=${natives_directory}", &vars), "-Djava.library.path=${natives_directory}");
+        assert_eq!(
+            substitute("-Djava.library.path=${natives_directory}", &vars),
+            "-Djava.library.path=${natives_directory}"
+        );
     }
 
     #[test]
     fn classpath_entries_are_unique() {
-        let entries = unique_classpath_entries(vec![PathBuf::from("gson.jar"), PathBuf::from("gson.jar"), PathBuf::from("client.jar")]);
-        assert_eq!(entries, vec![PathBuf::from("gson.jar"), PathBuf::from("client.jar")]);
+        let entries = unique_classpath_entries(vec![
+            PathBuf::from("gson.jar"),
+            PathBuf::from("gson.jar"),
+            PathBuf::from("client.jar"),
+        ]);
+        assert_eq!(
+            entries,
+            vec![PathBuf::from("gson.jar"), PathBuf::from("client.jar")]
+        );
+    }
+
+    #[test]
+    fn quotes_java_argfile_arguments() {
+        assert_eq!(
+            quote_argfile_argument(r#"-Dpath=C:\\Users\\Jane Doe\\game"#),
+            r#""-Dpath=C:\\\\Users\\\\Jane Doe\\\\game""#
+        );
+        assert_eq!(
+            quote_argfile_argument(r#"-Dname="ShaCraft""#),
+            r#""-Dname=\"ShaCraft\"""#
+        );
     }
 }

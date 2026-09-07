@@ -57,21 +57,34 @@ pub enum NeoForgeError {
     Download(DownloadError),
     Io(io::Error),
     InvalidJson(serde_json::Error),
-    InstallerFailed { exit_code: Option<i32>, output_tail: String },
+    InstallerFailed {
+        exit_code: Option<i32>,
+        output_tail: String,
+    },
 }
 
 impl fmt::Display for NeoForgeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DisallowedHost(url) => write!(formatter, "URL is not a recognised NeoForge host: {url}"),
+            Self::DisallowedHost(url) => {
+                write!(formatter, "URL is not a recognised NeoForge host: {url}")
+            }
             Self::Network(error) => write!(formatter, "network error: {error}"),
             Self::HttpStatus(status) => write!(formatter, "maven.neoforged.net returned {status}"),
-            Self::InvalidChecksum(text) => write!(formatter, "unexpected checksum response: {text}"),
+            Self::InvalidChecksum(text) => {
+                write!(formatter, "unexpected checksum response: {text}")
+            }
             Self::Download(error) => write!(formatter, "{error}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::InvalidJson(error) => write!(formatter, "invalid NeoForge version JSON: {error}"),
-            Self::InstallerFailed { exit_code, output_tail } => {
-                write!(formatter, "NeoForge installer failed (exit {exit_code:?}):\n{output_tail}")
+            Self::InstallerFailed {
+                exit_code,
+                output_tail,
+            } => {
+                write!(
+                    formatter,
+                    "NeoForge installer failed (exit {exit_code:?}):\n{output_tail}"
+                )
             }
         }
     }
@@ -89,7 +102,10 @@ impl From<io::Error> for NeoForgeError {
 }
 
 pub(crate) fn is_allowed_host(url: &str) -> bool {
-    Url::parse(url).ok().and_then(|parsed| parsed.host_str().map(|host| host == NEOFORGE_HOST)).unwrap_or(false)
+    Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|host| host == NEOFORGE_HOST))
+        .unwrap_or(false)
 }
 
 fn installer_jar_url(loader_version: &str) -> String {
@@ -99,18 +115,29 @@ fn installer_jar_url(loader_version: &str) -> String {
 /// Downloads (or reuses a cached, still-valid) NeoForge installer jar,
 /// verified against the `.sha256` sidecar Maven publishes next to every
 /// artifact.
-pub fn ensure_installer(client: &Client, cache_dir: &Path, loader_version: &str) -> Result<PathBuf, NeoForgeError> {
+pub fn ensure_installer(
+    client: &Client,
+    cache_dir: &Path,
+    loader_version: &str,
+) -> Result<PathBuf, NeoForgeError> {
     let jar_url = installer_jar_url(loader_version);
     let checksum_url = format!("{jar_url}.sha256");
     if !is_allowed_host(&jar_url) {
         return Err(NeoForgeError::DisallowedHost(jar_url));
     }
 
-    let response = client.get(&checksum_url).send().map_err(NeoForgeError::Network)?;
+    let response = client
+        .get(&checksum_url)
+        .send()
+        .map_err(NeoForgeError::Network)?;
     if !response.status().is_success() {
         return Err(NeoForgeError::HttpStatus(response.status()));
     }
-    let sha256 = response.text().map_err(NeoForgeError::Network)?.trim().to_ascii_lowercase();
+    let sha256 = response
+        .text()
+        .map_err(NeoForgeError::Network)?
+        .trim()
+        .to_ascii_lowercase();
     if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(NeoForgeError::InvalidChecksum(sha256));
     }
@@ -139,6 +166,23 @@ pub fn installed_version_json_path(game_dir: &Path, loader_version: &str) -> Pat
         .join(format!("neoforge-{loader_version}.json"))
 }
 
+fn patched_client_path(game_dir: &Path, loader_version: &str) -> PathBuf {
+    game_dir
+        .join("libraries/net/neoforged/neoforge")
+        .join(loader_version)
+        .join(format!("neoforge-{loader_version}-client.jar"))
+}
+
+fn is_nonempty_file(path: &Path) -> bool {
+    path.metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+}
+
+fn installation_complete(game_dir: &Path, loader_version: &str) -> bool {
+    is_nonempty_file(&installed_version_json_path(game_dir, loader_version))
+        && is_nonempty_file(&patched_client_path(game_dir, loader_version))
+}
+
 /// The installer jar bundles its own `install_profile.json`, which lists
 /// exactly which libraries it will download and which processors it will
 /// run to patch the client — the same manifest the installer itself reads.
@@ -161,7 +205,14 @@ fn read_install_profile_counts(installer_path: &Path) -> Option<(u64, u64)> {
 /// installer logging a couple of extra non-library downloads) never exceeds
 /// or exceeds `total` by much. `total_libraries` caps the download half so
 /// those extra lines cannot crowd out the processor half of the bar.
-fn observe_installer_line(line: &str, downloads_done: &AtomicU64, processors_done: &AtomicU64, total_libraries: u64, total: u64, on_progress: &ProgressCallback) {
+fn observe_installer_line(
+    line: &str,
+    downloads_done: &AtomicU64,
+    processors_done: &AtomicU64,
+    total_libraries: u64,
+    total: u64,
+    on_progress: &ProgressCallback,
+) {
     let trimmed = line.trim_start();
     if trimmed.starts_with("Download completed") {
         downloads_done.fetch_add(1, Ordering::Relaxed);
@@ -173,12 +224,19 @@ fn observe_installer_line(line: &str, downloads_done: &AtomicU64, processors_don
     } else {
         return;
     }
-    let current = downloads_done.load(Ordering::Relaxed).min(total_libraries) + processors_done.load(Ordering::Relaxed);
+    let current = downloads_done.load(Ordering::Relaxed).min(total_libraries)
+        + processors_done.load(Ordering::Relaxed);
     on_progress(current.min(total), total);
 }
 
 fn truncate_tail(text: &str) -> String {
-    text.chars().rev().take(4000).collect::<String>().chars().rev().collect()
+    text.chars()
+        .rev()
+        .take(4000)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect()
 }
 
 /// Runs the installer with piped output, reporting live progress as its own
@@ -219,7 +277,14 @@ fn run_installer_with_progress(
         let on_progress = Arc::clone(on_progress);
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                observe_installer_line(&line, &downloads_done, &processors_done, total_libraries, total, &on_progress);
+                observe_installer_line(
+                    &line,
+                    &downloads_done,
+                    &processors_done,
+                    total_libraries,
+                    total,
+                    &on_progress,
+                );
                 let mut log = combined_log.lock().unwrap();
                 log.push_str(&line);
                 log.push('\n');
@@ -243,7 +308,10 @@ fn run_installer_with_progress(
     let tail = truncate_tail(&combined_log.lock().unwrap());
 
     if !status.success() {
-        return Err(NeoForgeError::InstallerFailed { exit_code: status.code(), output_tail: tail });
+        return Err(NeoForgeError::InstallerFailed {
+            exit_code: status.code(),
+            output_tail: tail,
+        });
     }
     Ok((status.code(), tail))
 }
@@ -258,19 +326,48 @@ fn run_installer_with_progress(
 /// progress (installer-confirmed library downloads plus patch-processor
 /// steps, read from the installer's own `install_profile.json`) while it
 /// runs; it fires once with `(1, 1)` when already installed.
-pub fn ensure_client_installed(client: &Client, java_executable: &Path, game_dir: &Path, cache_dir: &Path, loader_version: &str, on_progress: &ProgressCallback) -> Result<VersionJson, NeoForgeError> {
+pub fn ensure_client_installed(
+    client: &Client,
+    java_executable: &Path,
+    game_dir: &Path,
+    cache_dir: &Path,
+    loader_version: &str,
+    on_progress: &ProgressCallback,
+) -> Result<VersionJson, NeoForgeError> {
     let version_json_path = installed_version_json_path(game_dir, loader_version);
-    if !version_json_path.exists() {
+    if !installation_complete(game_dir, loader_version) {
         ensure_launcher_profiles_stub(game_dir)?;
         let installer_path = ensure_installer(client, cache_dir, loader_version)?;
 
-        let (total_libraries, total_processors) = read_install_profile_counts(&installer_path).unwrap_or((0, 0));
+        // A leftover version JSON makes some installer versions treat the
+        // profile as already installed even when the patched client was
+        // deleted or quarantined. Remove only that generated marker so the
+        // official installer is forced to rebuild the incomplete profile.
+        match fs::remove_file(&version_json_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(NeoForgeError::Io(error)),
+        }
+
+        let (total_libraries, total_processors) =
+            read_install_profile_counts(&installer_path).unwrap_or((0, 0));
         let total = (total_libraries + total_processors).max(1);
         on_progress(0, total);
 
-        let (exit_code, tail) = run_installer_with_progress(java_executable, &installer_path, game_dir, cache_dir, total_libraries, total, on_progress)?;
-        if !version_json_path.exists() {
-            return Err(NeoForgeError::InstallerFailed { exit_code, output_tail: tail });
+        let (exit_code, tail) = run_installer_with_progress(
+            java_executable,
+            &installer_path,
+            game_dir,
+            cache_dir,
+            total_libraries,
+            total,
+            on_progress,
+        )?;
+        if !installation_complete(game_dir, loader_version) {
+            return Err(NeoForgeError::InstallerFailed {
+                exit_code,
+                output_tail: tail,
+            });
         }
         on_progress(total, total);
     } else {
@@ -296,12 +393,15 @@ mod tests {
     #[test]
     fn rejects_non_neoforge_hosts() {
         assert!(!is_allowed_host("https://example.com/evil.jar"));
-        assert!(is_allowed_host("https://maven.neoforged.net/releases/x.jar"));
+        assert!(is_allowed_host(
+            "https://maven.neoforged.net/releases/x.jar"
+        ));
     }
 
     #[test]
     fn launcher_profiles_stub_is_idempotent() {
-        let dir = std::env::temp_dir().join(format!("shacraft-neoforge-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("shacraft-neoforge-test-{}", std::process::id()));
         ensure_launcher_profiles_stub(&dir).unwrap();
         let first = fs::read_to_string(dir.join("launcher_profiles.json")).unwrap();
         fs::write(dir.join("launcher_profiles.json"), "custom-content").unwrap();
@@ -310,6 +410,25 @@ mod tests {
         assert_eq!(second, "custom-content");
         assert!(first.contains("\"profiles\""));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn incomplete_install_is_not_accepted() {
+        let dir = std::env::temp_dir().join(format!(
+            "shacraft-neoforge-completeness-test-{}",
+            std::process::id()
+        ));
+        let version = "21.1.248";
+        let json = installed_version_json_path(&dir, version);
+        fs::create_dir_all(json.parent().unwrap()).unwrap();
+        fs::write(&json, b"{}").unwrap();
+        assert!(!installation_complete(&dir, version));
+
+        let client = patched_client_path(&dir, version);
+        fs::create_dir_all(client.parent().unwrap()).unwrap();
+        fs::write(&client, b"patched").unwrap();
+        assert!(installation_complete(&dir, version));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -326,12 +445,47 @@ mod tests {
 
         // A "Downloading library from ..." start line reports nothing by
         // itself; only its "Download completed" confirmation counts.
-        observe_installer_line("Downloading library from https://example/a.jar", &downloads_done, &processors_done, total_libraries, total, &on_progress);
-        observe_installer_line("Download completed: Checksum validated.", &downloads_done, &processors_done, total_libraries, total, &on_progress);
-        observe_installer_line("Download completed: Checksum validated.", &downloads_done, &processors_done, total_libraries, total, &on_progress);
-        observe_installer_line("Processor: net.neoforged.installertools:jarsplitter", &downloads_done, &processors_done, total_libraries, total, &on_progress);
+        observe_installer_line(
+            "Downloading library from https://example/a.jar",
+            &downloads_done,
+            &processors_done,
+            total_libraries,
+            total,
+            &on_progress,
+        );
+        observe_installer_line(
+            "Download completed: Checksum validated.",
+            &downloads_done,
+            &processors_done,
+            total_libraries,
+            total,
+            &on_progress,
+        );
+        observe_installer_line(
+            "Download completed: Checksum validated.",
+            &downloads_done,
+            &processors_done,
+            total_libraries,
+            total,
+            &on_progress,
+        );
+        observe_installer_line(
+            "Processor: net.neoforged.installertools:jarsplitter",
+            &downloads_done,
+            &processors_done,
+            total_libraries,
+            total,
+            &on_progress,
+        );
         // A processor's sub-step lines (three colons) must not double-count.
-        observe_installer_line("Processor: net.neoforged.installertools:jarsplitter: Loading patch files", &downloads_done, &processors_done, total_libraries, total, &on_progress);
+        observe_installer_line(
+            "Processor: net.neoforged.installertools:jarsplitter: Loading patch files",
+            &downloads_done,
+            &processors_done,
+            total_libraries,
+            total,
+            &on_progress,
+        );
 
         assert_eq!(*calls.lock().unwrap(), vec![(1, 3), (2, 3), (3, 3)]);
     }
@@ -350,7 +504,8 @@ mod tests {
         use crate::{java, mojang};
 
         let client = Client::builder().build().unwrap();
-        let root = std::env::temp_dir().join(format!("shacraft-neoforge-pipeline-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("shacraft-neoforge-pipeline-{}", std::process::id()));
         let game_dir = root.join("game");
         let cache_dir = root.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
@@ -360,7 +515,8 @@ mod tests {
         let vanilla = mojang::fetch_version_json(&client, entry).unwrap();
 
         let no_progress: ProgressCallback = Arc::new(|_, _| {});
-        let java_install = java::ensure_java(&client, &root.join("runtime"), 21, &no_progress).unwrap();
+        let java_install =
+            java::ensure_java(&client, &root.join("runtime"), 21, &no_progress).unwrap();
 
         // The installer fetches and patches vanilla itself; we don't
         // pre-download it. It only needs a Java runtime and an empty dir.
@@ -369,25 +525,65 @@ mod tests {
             let progress_calls = Arc::clone(&progress_calls);
             Arc::new(move |current, total| progress_calls.lock().unwrap().push((current, total)))
         };
-        let neoforge_version = ensure_client_installed(&client, Path::new(&java_install.executable), &game_dir, &cache_dir, "21.1.248", &progress).unwrap();
+        let neoforge_version = ensure_client_installed(
+            &client,
+            Path::new(&java_install.executable),
+            &game_dir,
+            &cache_dir,
+            "21.1.248",
+            &progress,
+        )
+        .unwrap();
         let merged = mojang::merge_versions(&vanilla, Some(&neoforge_version)).unwrap();
-        assert_eq!(merged.main_class, "cpw.mods.bootstraplauncher.BootstrapLauncher");
-        assert!(merged.libraries.len() > 100, "expected vanilla (97) + neoforge (47) libraries, got {}", merged.libraries.len());
+        assert_eq!(
+            merged.main_class,
+            "cpw.mods.bootstraplauncher.BootstrapLauncher"
+        );
+        assert!(
+            merged.libraries.len() > 100,
+            "expected vanilla (97) + neoforge (47) libraries, got {}",
+            merged.libraries.len()
+        );
 
-        let patched_client = game_dir.join("libraries/net/neoforged/neoforge/21.1.248/neoforge-21.1.248-client.jar");
-        assert!(patched_client.exists(), "FancyModLoader needs this at runtime even though it is not on the generic classpath");
+        let patched_client =
+            game_dir.join("libraries/net/neoforged/neoforge/21.1.248/neoforge-21.1.248-client.jar");
+        assert!(
+            patched_client.exists(),
+            "FancyModLoader needs this at runtime even though it is not on the generic classpath"
+        );
 
         let calls = progress_calls.lock().unwrap();
-        assert!(calls.len() > 5, "expected many incremental progress calls, got {}", calls.len());
+        assert!(
+            calls.len() > 5,
+            "expected many incremental progress calls, got {}",
+            calls.len()
+        );
         let (last_current, last_total) = *calls.last().unwrap();
-        assert_eq!(last_current, last_total, "progress must reach 100% on success");
-        assert!(calls.windows(2).all(|pair| pair[0].0 <= pair[1].0), "reported progress must never go backwards");
+        assert_eq!(
+            last_current, last_total,
+            "progress must reach 100% on success"
+        );
+        assert!(
+            calls.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+            "reported progress must never go backwards"
+        );
         drop(calls);
 
         // Re-running must skip straight to reading the cached version JSON
         // rather than invoking the installer again.
-        let neoforge_again = ensure_client_installed(&client, Path::new(&java_install.executable), &game_dir, &cache_dir, "21.1.248", &no_progress).unwrap();
-        assert_eq!(neoforge_again.libraries.len(), neoforge_version.libraries.len());
+        let neoforge_again = ensure_client_installed(
+            &client,
+            Path::new(&java_install.executable),
+            &game_dir,
+            &cache_dir,
+            "21.1.248",
+            &no_progress,
+        )
+        .unwrap();
+        assert_eq!(
+            neoforge_again.libraries.len(),
+            neoforge_version.libraries.len()
+        );
 
         fs::remove_dir_all(&root).ok();
     }
