@@ -63,21 +63,14 @@ type SyncResult = {
   downloadedBytes: number
 }
 
-type MinecraftProfile = {
-  id: string
-  name: string
+type ShaCraftAccount = {
+  username: string
+  links: { server_id: string; mc_username: string }[]
 }
 
-type DeviceCodePayload = {
-  verificationUri: string
-  userCode: string
-  expiresInSeconds: number
-}
-
-type LoginResultPayload = {
-  ok: boolean
-  profile?: MinecraftProfile
-  error?: string
+type ShaCraftLoginResult = {
+  account: ShaCraftAccount
+  recoveryCodes: string[]
 }
 
 type ServerStatus = {
@@ -140,8 +133,13 @@ function App() {
   const [syncError, setSyncError] = useState<string | null>(null)
 
   // undefined = still checking for a saved session; null = signed out.
-  const [account, setAccount] = useState<MinecraftProfile | null | undefined>(undefined)
-  const [loginCode, setLoginCode] = useState<DeviceCodePayload | null>(null)
+  const [account, setAccount] = useState<ShaCraftAccount | null | undefined>(undefined)
+  const [accountUsername, setAccountUsername] = useState('')
+  const [accountPassword, setAccountPassword] = useState('')
+  const [registering, setRegistering] = useState(false)
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
+  const [linkNickname, setLinkNickname] = useState('')
+  const [linkMessage, setLinkMessage] = useState<string | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
   const [installing, setInstalling] = useState(false)
@@ -149,7 +147,7 @@ function App() {
   const [installProgress, setInstallProgress] = useState<InstallProgressPayload | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
-  const [microsoftLoginAvailable, setMicrosoftLoginAvailable] = useState(false)
+  const linkedNickname = account?.links.find((link) => link.server_id === 'aoc')?.mc_username
 
   useEffect(() => {
     if (progress === null) return
@@ -177,16 +175,13 @@ function App() {
     invoke<JavaInstallation | null>('detect_java')
       .then(setJava)
       .catch(() => setJava(null))
-    invoke<boolean>('microsoft_login_available')
-      .then(setMicrosoftLoginAvailable)
-      .catch(() => setMicrosoftLoginAvailable(false))
     invoke<ProfileInspection>('inspect_remote_profile', { profileId: 'aeronautics' })
       .then((inspection) => {
         setProfile(inspection)
         setReady(inspection.upToDate)
       })
       .catch(() => undefined)
-    invoke<MinecraftProfile | null>('get_account')
+    invoke<ShaCraftAccount | null>('get_shacraft_account')
       .then(setAccount)
       .catch(() => setAccount(null))
   }, [])
@@ -214,17 +209,6 @@ function App() {
   useEffect(() => {
     if (!isTauri()) return
     const unlisten = [
-      listen<DeviceCodePayload>('msa-login-code', (event) => setLoginCode(event.payload)),
-      listen<LoginResultPayload>('msa-login-result', (event) => {
-        setLoggingIn(false)
-        setLoginCode(null)
-        if (event.payload.ok && event.payload.profile) {
-          setAccount(event.payload.profile)
-          setLoginError(null)
-        } else {
-          setLoginError(event.payload.error ?? 'Не удалось войти через Microsoft')
-        }
-      }),
       listen<InstallProgressPayload>('game-install-progress', (event) => setInstallProgress(event.payload)),
       listen<GameExitedPayload>('game-exited', (event) => {
         setInstalling(false)
@@ -252,17 +236,6 @@ function App() {
     saveSettings(memoryGb)
   }
 
-  const saveNickname = () => {
-    if (/^[A-Za-z0-9_]{3,16}$/.test(nickname)) {
-      saveSettings(ram, nickname)
-    }
-  }
-
-  const setMode = (mode: 'microsoft' | 'offline') => {
-    setAccountMode(mode)
-    saveSettings(ram, nickname, mode)
-  }
-
   const repair = async () => {
     if (isTauri()) {
       setSyncError(null)
@@ -284,36 +257,79 @@ function App() {
   }
 
   const startLogin = async () => {
-    if (!isTauri() || !microsoftLoginAvailable) {
-      setLoginError('Вход через Microsoft пока не настроен для этой версии лаунчера')
+    if (!isTauri()) return
+    setLoginError(null)
+    if (!/^[A-Za-z0-9_]{3,32}$/.test(accountUsername) || accountPassword.length < 8) {
+      setLoginError('Логин: 3–32 символа; пароль: минимум 8 символов')
       return
     }
-    setLoginError(null)
     setLoggingIn(true)
     try {
-      await invoke('start_microsoft_login')
+      const result = await invoke<ShaCraftLoginResult>('shacraft_authenticate', {
+        username: accountUsername,
+        password: accountPassword,
+        register: registering,
+      })
+      setAccount(result.account)
+      setAccountPassword('')
+      setRecoveryCodes(result.recoveryCodes)
+      setLoginError(null)
     } catch (error) {
+      setLoginError(errorMessage(error, registering ? 'Не удалось зарегистрироваться' : 'Не удалось войти'))
+    } finally {
       setLoggingIn(false)
-      setLoginError(errorMessage(error, 'Не удалось начать вход через Microsoft'))
     }
   }
 
   const logout = async () => {
     if (!isTauri()) return
-    await invoke('logout').catch(() => undefined)
+    await invoke('shacraft_logout').catch(() => undefined)
     setAccount(null)
+  }
+
+  const startNicknameLink = async () => {
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(linkNickname)) {
+      setLinkMessage('Ник: 3–16 латинских букв, цифр или _')
+      return
+    }
+    setLinkMessage('Создаём проверку…')
+    try {
+      const started = await invoke<{ challenge_id: number; registered_on_server: boolean }>('shacraft_start_link', { nickname: linkNickname })
+      setLinkMessage(started.registered_on_server
+        ? 'Зайдите на Aeronautics с этим ником и выполните /login.'
+        : 'Зайдите на Aeronautics с этим ником и выполните /register.')
+      const timer = window.setInterval(async () => {
+        try {
+          const result = await invoke<{ status: string; detail?: string }>('shacraft_link_status', { challengeId: started.challenge_id })
+          if (result.status === 'verified') {
+            window.clearInterval(timer)
+            const refreshed = await invoke<ShaCraftAccount>('get_shacraft_account')
+            setAccount(refreshed)
+            setLinkMessage('Ник подтверждён.')
+          } else if (result.status === 'expired' || result.status === 'conflict') {
+            window.clearInterval(timer)
+            setLinkMessage(result.detail ?? 'Проверка завершилась. Попробуйте ещё раз.')
+          }
+        } catch (error) {
+          window.clearInterval(timer)
+          setLinkMessage(errorMessage(error, 'Не удалось проверить ник'))
+        }
+      }, 3000)
+    } catch (error) {
+      setLinkMessage(errorMessage(error, 'Не удалось начать привязку'))
+    }
   }
 
   const playOrLogin = async () => {
     if (!isTauri()) return
-    if (accountMode === 'microsoft' && !microsoftLoginAvailable) {
-      setLaunchError('Вход Microsoft пока недоступен. Выберите Offline-аккаунт в настройках.')
+    if (!account) {
+      setSettingsOpen(true)
+      setLaunchError('Войдите в аккаунт ShaCraft, чтобы играть.')
       return
     }
-    // In offline mode we can launch without any Microsoft session. In
-    // Microsoft mode a signed-in account is still required first.
-    if (accountMode === 'microsoft' && (account === null || account === undefined)) {
-      await startLogin()
+    if (!linkedNickname) {
+      setSettingsOpen(true)
+      setLaunchError('Привяжите игровой ник к Aeronautics, чтобы играть.')
       return
     }
     setLaunchError(null)
@@ -343,9 +359,9 @@ function App() {
   }
 
   const playLabel = () => {
-    if (accountMode === 'microsoft' && !microsoftLoginAvailable) return 'Microsoft недоступен'
-    if (accountMode === 'microsoft' && account === undefined) return 'Загрузка…'
-    if (accountMode === 'microsoft' && account === null) return loggingIn ? 'Ждём вход…' : 'Войти через Microsoft'
+    if (account === undefined) return 'Загрузка…'
+    if (account === null) return 'Войти в ShaCraft'
+    if (!linkedNickname) return 'Привязать ник'
     if (gameRunning) return 'Игра запущена'
     if (installing) return installProgress ? `${INSTALL_STAGE_LABEL[installProgress.stage]}…` : 'Подготовка…'
     if (syncing || progress !== null) return 'Обновление'
@@ -412,10 +428,10 @@ function App() {
           </div>
 
           <button className="account-chip" onClick={() => setSettingsOpen(true)}>
-            <span className="avatar">{accountMode === 'offline' ? nickname.slice(0, 2).toUpperCase() : (account ? account.name.slice(0, 2).toUpperCase() : '?')}</span>
+            <span className="avatar">{linkedNickname ? linkedNickname.slice(0, 2).toUpperCase() : (account ? account.username.slice(0, 2).toUpperCase() : '?')}</span>
             <span>
-              <strong>{accountMode === 'offline' ? nickname : (account === undefined ? 'Проверяем…' : account === null ? 'Не авторизован' : account.name)}</strong>
-              <small>{accountMode === 'offline' ? 'Offline-аккаунт' : (account ? 'Microsoft-аккаунт' : 'Войдите, чтобы играть')}</small>
+              <strong>{account === undefined ? 'Проверяем…' : account === null ? 'Не авторизован' : (linkedNickname ?? account.username)}</strong>
+              <small>{account ? `ShaCraft · ${account.username}` : 'Войдите, чтобы играть'}</small>
             </span>
             <ChevronRight size={16} />
           </button>
@@ -471,7 +487,7 @@ function App() {
                 <>
                   <span className="state-icon"><ShieldCheck size={19} /></span>
                   <span>
-                    <strong>{accountMode === 'microsoft' && !microsoftLoginAvailable ? 'Microsoft пока недоступен' : accountMode === 'microsoft' && account === null ? 'Нужен вход' : ready ? 'Файлы сборки готовы' : 'Требуется проверка'}</strong>
+                    <strong>{account === null ? 'Нужен вход ShaCraft' : !linkedNickname ? 'Нужно привязать ник' : ready ? 'Файлы сборки готовы' : 'Требуется проверка'}</strong>
                     <small>{launchError || syncError || loginError || (profile ? `${profile.managedFiles} файлов сборки` : 'Проверяем локальные файлы')}</small>
                   </span>
                 </>
@@ -490,7 +506,7 @@ function App() {
             </button>
             <button
               className="play-button"
-              disabled={progress !== null || syncing || installing || gameRunning || (accountMode === 'microsoft' && (account === undefined || !microsoftLoginAvailable)) || loggingIn}
+              disabled={progress !== null || syncing || installing || gameRunning || account === undefined || loggingIn}
               onClick={playOrLogin}
             >
               <Play size={21} fill="currentColor" />
@@ -500,13 +516,13 @@ function App() {
         </main>
       </div>
 
-      <div className={`drawer-backdrop ${loginCode ? 'visible' : ''}`} />
-      {loginCode && (
+      <div className={`drawer-backdrop ${recoveryCodes.length ? 'visible' : ''}`} />
+      {recoveryCodes.length > 0 && (
         <div className="login-modal" role="dialog" aria-modal="true">
-          <h2>Вход через Microsoft</h2>
-          <p>Откройте страницу и введите код, чтобы подтвердить вход в аккаунт с лицензией Minecraft.</p>
-          <div className="login-code">{loginCode.userCode}</div>
-          <p className="login-url">{loginCode.verificationUri}</p>
+          <h2>Коды восстановления</h2>
+          <p>Сохраните их сейчас. Каждый код можно использовать один раз для восстановления пароля.</p>
+          <div className="login-code" style={{ whiteSpace: 'pre-line', fontSize: '15px' }}>{recoveryCodes.join('\n')}</div>
+          <button className="setting-row" onClick={() => setRecoveryCodes([])}><span>Я сохранил коды</span></button>
         </div>
       )}
 
@@ -523,34 +539,46 @@ function App() {
         </label>
         <div className="setting-row static">
           <span><Users />Аккаунт</span>
-          <small>{accountMode === 'offline' ? 'Offline' : (microsoftLoginAvailable ? (account ? account.name : 'Не авторизован') : 'Временно недоступен')}</small>
+          <small>{account ? account.username : 'Не авторизован'}</small>
         </div>
-        {accountMode === 'offline' && (
-          <label className="text-setting">
-            <span><strong>Игровой ник</strong><small>Offline-профиль</small></span>
-            <input value={nickname} maxLength={16} onChange={(event) => setNickname(event.target.value)} onBlur={saveNickname} placeholder="Player" />
-            <small>Латинские буквы, цифры и _ · от 3 до 16 символов</small>
-          </label>
+        {!account && (
+          <>
+            <label className="text-setting">
+              <span><strong>Логин ShaCraft</strong><small>3–32 символа</small></span>
+              <input value={accountUsername} maxLength={32} autoComplete="username" onChange={(event) => setAccountUsername(event.target.value)} placeholder="Логин" />
+            </label>
+            <label className="text-setting">
+              <span><strong>Пароль</strong><small>Минимум 8 символов</small></span>
+              <input type="password" value={accountPassword} maxLength={128} autoComplete={registering ? 'new-password' : 'current-password'} onChange={(event) => setAccountPassword(event.target.value)} placeholder="Пароль" />
+            </label>
+            {loginError && <div className="drawer-note">{loginError}</div>}
+            <button className="setting-row" onClick={startLogin} disabled={loggingIn}>
+              <span>{loggingIn ? 'Подождите…' : registering ? 'Создать аккаунт' : 'Войти'}</span>
+            </button>
+            <button className="setting-row" onClick={() => { setRegistering(!registering); setLoginError(null) }}>
+              <span>{registering ? 'Уже есть аккаунт' : 'Нет аккаунта — регистрация'}</span>
+            </button>
+          </>
         )}
-        <div className="setting-row">
-          <span>Тип аккаунта</span>
-          <select
-            value={accountMode}
-            onChange={(e) => setMode(e.target.value as 'microsoft' | 'offline')}
-            style={{ background: 'transparent', border: 0, color: 'inherit', textAlign: 'right' }}
-          >
-            <option value="offline">Offline</option>
-            <option value="microsoft" disabled={!microsoftLoginAvailable}>Microsoft (скоро)</option>
-          </select>
-        </div>
-        {accountMode === 'microsoft' && account && (
+        {account && !linkedNickname && (
+          <>
+            <label className="text-setting">
+              <span><strong>Игровой ник</strong><small>Aeronautics</small></span>
+              <input value={linkNickname} maxLength={16} onChange={(event) => setLinkNickname(event.target.value)} placeholder="Player" />
+              <small>Ник нельзя будет подменить локальной настройкой</small>
+            </label>
+            <button className="setting-row" onClick={startNicknameLink}><span>Привязать ник</span></button>
+            {linkMessage && <div className="drawer-note">{linkMessage}</div>}
+          </>
+        )}
+        {account && linkedNickname && (
+          <div className="setting-row static">
+            <span>Игровой ник</span><small>{linkedNickname}</small>
+          </div>
+        )}
+        {account && (
           <button className="setting-row" onClick={logout}>
-            <span><LogOut />Выйти из Microsoft</span>
-          </button>
-        )}
-        {accountMode === 'microsoft' && !account && microsoftLoginAvailable && (
-          <button className="setting-row" onClick={startLogin}>
-            <span><LogOut />Войти через Microsoft</span>
+            <span><LogOut />Выйти из ShaCraft</span>
           </button>
         )}
         <div className="setting-row static">

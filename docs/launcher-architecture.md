@@ -4,10 +4,10 @@
 
 The launcher persists local settings, synchronises Aeronautics mod/config
 files from the signed ShaCraft v2 manifest, installs the exact Minecraft +
-NeoForge version the manifest specifies, and launches the game. Players can
-launch either with a real Microsoft account or with a local offline profile
-(nickname + deterministic offline UUID) — see `docs/game-trust-boundary.md`
-and `AGENTS.md`'s trust model section.
+NeoForge version the manifest specifies, and launches the game. A player
+signs in with the same local ShaCraft account used on the website. The game
+identity is derived only from that account's verified Aeronautics nickname;
+the legacy editable nickname setting is not trusted at launch.
 
 The interface also shows a live Aeronautics player count from the fixed,
 read-only `https://shacraft.ru/api/online/aoc` endpoint. It is display-only:
@@ -33,7 +33,8 @@ Game itself (never controlled by the manifest above)
   -> NeoForge's own installer, run headlessly (neoforge.rs)
   -> generic inheritsFrom merge of the two version JSONs (mojang.rs)
   -> SHA-1-verified merged libraries + platform natives (mojang.rs)
-  -> real Microsoft/Xbox/Minecraft Services login (msa.rs)
+  -> verified ShaCraft account link (shacraft_account.rs)
+  -> deterministic offline UUID for the linked nickname (session.rs)
   -> java process spawned with the merged classpath/args (launch.rs)
 ```
 
@@ -42,8 +43,9 @@ screenshots/resourcepacks) live below Tauri's `app_data_dir()/profiles/
 <profile-id>` — this becomes `--gameDir`. The shared vanilla+NeoForge
 install (versions/libraries/assets/runtime, reused across profiles that
 target the same Minecraft version) lives at `app_data_dir()/game`. Settings
-live at `app_data_dir()/settings.json`, the Microsoft refresh token at
-`app_data_dir()/account.json` (mode 600). None of these should be assumed to
+live at `app_data_dir()/settings.json`, and the revocable ShaCraft session at
+`app_data_dir()/shacraft-session` (mode 600 on Unix). Passwords are never
+written to disk. None of these should be assumed to
 be the system `.minecraft` directory.
 
 ## Aeronautics contract
@@ -57,6 +59,9 @@ be the system `.minecraft` directory.
   no launcher release.
 - ShaCraft download files: HTTPS only, exact hosts `shacraft.ru` and
   `cdn.shacraft.ru`.
+- Account API origin: fixed `https://shacraft.ru`; redirects are rejected.
+- Launch identity: the most recently verified `aoc` nickname returned by the
+  authenticated account API. Local nickname edits cannot select an identity.
 
 ## Planned but not implemented
 

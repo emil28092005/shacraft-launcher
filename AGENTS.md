@@ -39,15 +39,13 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   independent, hardcoded-host trust domains (Mojang, NeoForge, Microsoft,
   Adoptium) that install and run the actual game. Do not let manifest data
   control a URL in any of those domains.
-- Account modes: the launcher supports launching as either a genuine
-  Microsoft account that owns Minecraft Java Edition (`src-tauri/src/msa.rs`,
-  device-code OAuth -> Xbox Live -> XSTS -> Minecraft Services) or as a local
-  offline profile (nickname + deterministic offline UUID, see
-  `src-tauri/src/session.rs`). The mode is an explicit player choice
-  (`account_mode` in settings); offline is never silently substituted for a
-  Microsoft session. The mc-aoc/mc-create servers' own `ONLINE_MODE=FALSE` +
-  whitelist + Login System are a separate, independent access-control layer
-  on the server side.
+- ShaCraft accounts: `src-tauri/src/shacraft_account.rs` talks only to the
+  hardcoded `https://shacraft.ru` origin. Passwords are never persisted. The
+  revocable session token is stored locally with mode 600 on Unix. At launch,
+  the nickname is fetched from the verified `aoc` account link; the legacy
+  nickname in `settings.json` is ignored as an identity source. Server-side
+  whitelist enforcement and LoginSystem remain the final access-control
+  boundary, including for old launcher versions.
 
 ## Layout
 
@@ -66,6 +64,8 @@ payload are in `/root/shacraft` on the ShaCraft host; see
     `MSA_CLIENT_ID`'s doc comment before touching login — it is currently a
     placeholder pending ShaCraft's own Azure AD app registration and
     Minecraft-API approval.
+  - `shacraft_account.rs` — local ShaCraft login/registration, session and
+    verified nickname-link API.
   - `launch.rs` — builds and spawns the actual `java` process.
 - `src-tauri/src/settings.rs` — durable local preferences; maintain backward
   compatibility with already-written JSON.

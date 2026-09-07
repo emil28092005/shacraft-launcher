@@ -9,6 +9,7 @@ mod profile;
 mod remote;
 mod runtime;
 mod session;
+mod shacraft_account;
 mod settings;
 
 use reqwest::blocking::Client;
@@ -162,6 +163,48 @@ async fn save_settings(app: AppHandle, settings: settings::LauncherSettings) -> 
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn shacraft_authenticate(app: AppHandle, username: String, password: String, register: bool) -> Result<shacraft_account::LoginResult, String> {
+    let data_dir = app.path().app_data_dir().map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || shacraft_account::authenticate(&data_dir, &username, &password, register))
+        .await.map_err(|error| format!("Account task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_shacraft_account(app: AppHandle) -> Result<Option<shacraft_account::Account>, String> {
+    let data_dir = app.path().app_data_dir().map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || match shacraft_account::get_account(&data_dir) {
+        Ok(account) => Ok(Some(account)),
+        Err(shacraft_account::AccountError::InvalidSession) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }).await.map_err(|error| format!("Account task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn shacraft_logout(app: AppHandle) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || shacraft_account::logout(&data_dir))
+        .await.map_err(|error| format!("Account task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn shacraft_start_link(app: AppHandle, nickname: String) -> Result<shacraft_account::LinkStart, String> {
+    let data_dir = app.path().app_data_dir().map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || shacraft_account::start_link(&data_dir, "aoc", &nickname))
+        .await.map_err(|error| format!("Link task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn shacraft_link_status(app: AppHandle, challenge_id: i64) -> Result<shacraft_account::LinkStatus, String> {
+    let data_dir = app.path().app_data_dir().map_err(|error| format!("Cannot resolve launcher data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || shacraft_account::link_status(&data_dir, challenge_id))
+        .await.map_err(|error| format!("Link task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 // ---------------------------------------------------------------------
 // Microsoft account login
 // ---------------------------------------------------------------------
@@ -248,23 +291,12 @@ async fn logout(app: AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Resolves the identity to launch as, based on the persisted `account_mode`.
-/// In `Microsoft` mode this requires a real signed-in session (see
-/// `msa::login_with_refresh_token`) and returns an error if there is none;
-/// in `Offline` mode it uses the local nickname from settings, so no
-/// Microsoft account is needed at all. Offline is never silently used in
-/// place of a missing Microsoft session.
-fn resolve_identity(client: &Client, data_dir: &Path) -> Result<session::PlayerIdentity, String> {
-    let settings = settings::load(data_dir).map_err(|error| error.to_string())?;
-    match settings.account_mode {
-        settings::AccountMode::Offline => Ok(session::PlayerIdentity::Offline { name: settings.nickname }),
-        settings::AccountMode::Microsoft => {
-            let refresh_token = msa::load_refresh_token(data_dir).ok_or("Not signed in with a Microsoft account")?;
-            let result = msa::login_with_refresh_token(client, &refresh_token).map_err(|error| error.to_string())?;
-            let _ = msa::save_refresh_token(data_dir, &result.refresh_token);
-            Ok(session::PlayerIdentity::Microsoft(result))
-        }
-    }
+/// Resolves the identity from the server-side ShaCraft account link. Local
+/// settings are deliberately not trusted for a nickname, so editing an old
+/// settings file cannot change the identity used by this launcher.
+fn resolve_identity(_client: &Client, data_dir: &Path) -> Result<session::PlayerIdentity, String> {
+    let name = shacraft_account::aeronautics_nickname(data_dir).map_err(|error| error.to_string())?;
+    Ok(session::PlayerIdentity::Offline { name })
 }
 
 // ---------------------------------------------------------------------
@@ -416,6 +448,11 @@ pub fn run() {
             get_server_status,
             load_settings,
             save_settings,
+            shacraft_authenticate,
+            get_shacraft_account,
+            shacraft_logout,
+            shacraft_start_link,
+            shacraft_link_status,
             start_microsoft_login,
             get_account,
             logout,
