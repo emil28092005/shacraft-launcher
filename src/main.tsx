@@ -259,8 +259,8 @@ function App() {
   const startLogin = async () => {
     if (!isTauri()) return
     setLoginError(null)
-    if (!/^[A-Za-z0-9_]{3,32}$/.test(accountUsername) || accountPassword.length < 8) {
-      setLoginError('Логин: 3–32 символа; пароль: минимум 8 символов')
+    if (!/^[A-Za-z0-9_]{3,32}$/.test(accountUsername) || accountPassword.length < 3) {
+      setLoginError('Логин: 3–32 символа; пароль: минимум 3 символа')
       return
     }
     setLoggingIn(true)
@@ -548,7 +548,7 @@ function App() {
               <input value={accountUsername} maxLength={32} autoComplete="username" onChange={(event) => setAccountUsername(event.target.value)} placeholder="Логин" />
             </label>
             <label className="text-setting">
-              <span><strong>Пароль</strong><small>Минимум 8 символов</small></span>
+              <span><strong>Пароль</strong><small>Минимум 3 символа</small></span>
               <input type="password" value={accountPassword} maxLength={128} autoComplete={registering ? 'new-password' : 'current-password'} onChange={(event) => setAccountPassword(event.target.value)} placeholder="Пароль" />
             </label>
             {loginError && <div className="drawer-note">{loginError}</div>}
