@@ -184,7 +184,10 @@ updates preserve it:
   into an appropriate Applications directory before use. A protected destination
   may require OS permission or a manual replacement; an installation error never
   counts as a completed update.
-- Linux x64 AppImage → x64 AppImage at its current writable location. Debian
+- Linux x64 AppImage → x64 AppImage at its current writable location. The original
+  ordinary, non-symlink AppImage must exist, and the frozen Tauri `APPDIR` must
+  match the running `usr/bin/shacraft-launcher`. Extracted AppDirs and an inherited
+  environment from another AppImage use manual installation. Debian
   packages, RPM, bare development binaries and unsupported architectures never
   enter the self-replacement path. Install a new deb through the system package
   manager; the launcher does not run privileged package-manager commands.

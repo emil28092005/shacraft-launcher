@@ -14,6 +14,8 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+#[cfg(target_os = "linux")]
+use tauri::Manager;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -181,9 +183,80 @@ fn package_mode(
     }
 }
 
-fn current_mode() -> PackageMode {
+// The stamped bundle type survives extracting an AppImage. It does not identify
+// the runtime file which the plugin will replace. Only the frozen Tauri Env is
+// shared with the plugin's executable_path selection; do not reread process env.
+#[cfg(any(target_os = "linux", test))]
+fn appimage_context_valid(path: Option<&Path>, ordinary_file: bool, header: &[u8]) -> bool {
+    path.is_some_and(Path::is_absolute)
+        && ordinary_file
+        && format::verify(
+            &PackageMode::Automatic {
+                platform: "linux-x86_64",
+                msi: false,
+            },
+            header,
+        )
+        .is_ok()
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn appimage_file_ready(path: Option<&Path>) -> bool {
+    use std::io::Read;
+    let Some(path) = path else { return false };
+    let ordinary_file = std::fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false);
+    if !path.is_absolute() || !ordinary_file {
+        return false;
+    }
+    let mut header = [0; 20];
+    if std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_err()
+    {
+        return false;
+    }
+    appimage_context_valid(Some(path), ordinary_file, &header)
+}
+
+// Binding APPDIR to the actual executable rejects APPIMAGE/APPDIR inherited
+// from an unrelated parent application. The fixed relative path is the verified
+// Tauri AppDir layout for this application's configured binary name.
+#[cfg(any(target_os = "linux", test))]
+fn appdir_matches_executable(appdir: Option<&Path>, executable: Option<&Path>) -> bool {
+    let (Some(appdir), Some(executable)) = (appdir, executable) else {
+        return false;
+    };
+    if !appdir.is_absolute() || !executable.is_absolute() {
+        return false;
+    }
+    let (Ok(appdir), Ok(executable)) = (appdir.canonicalize(), executable.canonicalize()) else {
+        return false;
+    };
+    appdir.is_dir()
+        && executable.is_file()
+        && executable.strip_prefix(&appdir).ok() == Some(Path::new("usr/bin/shacraft-launcher"))
+}
+
+#[cfg(target_os = "linux")]
+fn appimage_runtime_ready(app: &AppHandle) -> bool {
+    let environment = app.env();
+    let executable = std::env::current_exe().ok();
+    appimage_file_ready(environment.appimage.as_deref().map(Path::new))
+        && appdir_matches_executable(
+            environment.appdir.as_deref().map(Path::new),
+            executable.as_deref(),
+        )
+}
+
+fn current_mode(_app: &AppHandle) -> PackageMode {
     // Bare binaries, distro packages and dev runs must never be overwritten as an AppImage/.app.
     if cfg!(debug_assertions) {
+        return PackageMode::Manual;
+    }
+    #[cfg(target_os = "linux")]
+    if !appimage_runtime_ready(_app) {
         return PackageMode::Manual;
     }
     #[cfg(target_os = "macos")]
@@ -275,12 +348,12 @@ pub(crate) fn check(app: &AppHandle, state: &UpdaterState) -> Result<UpdateStatu
     else {
         return Ok(state.phase(app, Phase::NoUpdate, None));
     };
-    let manual = current_mode() == PackageMode::Manual;
+    let manual = current_mode(app) == PackageMode::Manual;
     Ok(state.change(app, |data| {
         data.status.available_version = Some(verified.release.version.clone());
         data.status.release_notes = Some(verified.release.notes.clone());
         data.status.phase = if manual { Phase::Manual } else { Phase::Available };
-        data.status.message = manual.then(|| "Эта сборка обновляется вручную. Для .deb используйте менеджер пакетов; AppImage и установленные Windows/macOS пакеты поддерживают обновление внутри лаунчера.".into());
+        data.status.message = manual.then(|| "Эта сборка обновляется вручную. Для .deb используйте менеджер пакетов. Автообновление AppImage доступно при запуске исходного файла .AppImage; распакованная копия обновляется вручную.".into());
         data.candidate = Some(verified);
     }))
 }
@@ -320,7 +393,7 @@ pub(crate) fn download_install(
     if !release.is_newer_than(env!("CARGO_PKG_VERSION"))? {
         return Err("Эта версия уже установлена".into());
     }
-    let mode = current_mode();
+    let mode = current_mode(app);
     let artifact = select_artifact(&release, &mode)?;
     // Includes cross-process game lease and lifecycle exclusion; held through restart/handoff.
     let guard = UpdateGuard::acquire(directory, operations)?;
@@ -482,6 +555,104 @@ mod tests {
             }
         );
     }
+    #[test]
+    fn appimage_runtime_requires_absolute_ordinary_image_file() {
+        let absolute = std::env::temp_dir().join("launcher.AppImage");
+        let mut header = [0; 20];
+        header[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        header[8..11].copy_from_slice(b"AI\x02");
+        header[18..20].copy_from_slice(b"\x3e\x00");
+        assert!(appimage_context_valid(Some(&absolute), true, &header));
+        // A stamped extracted binary has no APPIMAGE runtime path. A relative
+        // path, missing file/directory/symlink or ordinary ELF is also manual.
+        assert!(!appimage_context_valid(None, true, &header));
+        assert!(!appimage_context_valid(
+            Some(Path::new("launcher.AppImage")),
+            true,
+            &header
+        ));
+        assert!(!appimage_context_valid(Some(&absolute), false, &header));
+        assert!(!appimage_context_valid(
+            Some(&absolute),
+            true,
+            &header[..10]
+        ));
+        header[8..11].fill(0);
+        assert!(!appimage_context_valid(Some(&absolute), true, &header));
+    }
+
+    #[test]
+    fn appimage_file_context_rejects_missing_directory_symlink_and_raw_binary() {
+        let root = std::env::temp_dir().join(format!(
+            "shacraft-appimage-context-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("launcher.AppImage");
+        assert!(!appimage_file_ready(None));
+        assert!(!appimage_file_ready(Some(&path)));
+        assert!(!appimage_file_ready(Some(&root)));
+        let mut header = [0; 20];
+        header[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        header[18..20].copy_from_slice(b"\x3e\x00");
+        std::fs::write(&path, header).unwrap();
+        assert!(!appimage_file_ready(Some(&path))); // ordinary extracted ELF
+        header[8..11].copy_from_slice(b"AI\x02");
+        std::fs::write(&path, header).unwrap();
+        assert!(appimage_file_ready(Some(&path))); // runtime image header fixture
+        #[cfg(unix)]
+        {
+            let link = root.join("linked.AppImage");
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            assert!(!appimage_file_ready(Some(&link)));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn appdir_binding_rejects_inherited_parent_context_and_escaped_executable() {
+        let root = std::env::temp_dir().join(format!(
+            "shacraft-appdir-context-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let appdir = root.join("ShaCraft.AppDir");
+        let executable = appdir.join("usr/bin/shacraft-launcher");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, b"fixture").unwrap();
+        let parent_appdir = root.join("Other.AppDir");
+        std::fs::create_dir(&parent_appdir).unwrap();
+        let bare = root.join("shacraft-launcher");
+        std::fs::write(&bare, b"fixture").unwrap();
+        assert!(appdir_matches_executable(Some(&appdir), Some(&executable)));
+        assert!(!appdir_matches_executable(None, Some(&executable)));
+        assert!(!appdir_matches_executable(Some(&appdir), None));
+        assert!(!appdir_matches_executable(
+            Some(Path::new("relative.AppDir")),
+            Some(&executable)
+        ));
+        assert!(!appdir_matches_executable(
+            Some(&parent_appdir),
+            Some(&executable)
+        ));
+        assert!(!appdir_matches_executable(Some(&appdir), Some(&bare)));
+        assert!(!appdir_matches_executable(Some(&root), Some(&executable))); // arbitrary ancestor is not sufficient
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(&executable).unwrap();
+            std::os::unix::fs::symlink(&bare, &executable).unwrap();
+            assert!(!appdir_matches_executable(Some(&appdir), Some(&executable)));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn updater_single_flight_releases_after_failure() {
         let state = UpdaterState::default();

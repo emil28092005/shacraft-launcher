@@ -220,7 +220,11 @@ The webview supplies no URLs, public keys, executable arguments, release version
 or arbitrary file path. No generic updater plugin permission is granted to it.
 The packaged native architecture selects the artifact: Windows preserves MSI
 versus NSIS, macOS preserves Intel versus Apple Silicon, Linux only replaces an
-AppImage. A Debian installation requires the user's package manager.
+AppImage. The original non-symlink AppImage must have the expected native header,
+and the frozen Tauri `APPDIR` must contain the actual running executable at
+`usr/bin/shacraft-launcher`. Extracted binaries and inherited context from another
+AppImage require manual installation. A Debian installation requires the user's
+package manager.
 
 Checks run once per application UI lifecycle and on explicit request. They do
 not install automatically. The settings drawer shows installed/available

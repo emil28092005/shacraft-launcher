@@ -61,6 +61,9 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   authenticated with the pinned Tauri/minisign public key before JSON parsing.
   Each exact version/platform artifact also requires that signature, SHA-256
   and size. Never reuse the ShaCraft mod-manifest key or accept IPC URLs/keys.
+- Linux self-update requires the original ordinary AppImage file and the frozen
+  Tauri `APPDIR` bound to the running `usr/bin/shacraft-launcher`. Extracted or
+  inherited AppImage context is manual-only; never replace a bare binary.
 - `update_guard.rs` retains one launcher-instance OS lock, drains native writes
   through `operations::Lifecycle`, and checks the existing detached-game lease.
   `launcher-state/pending-update.json` survives installer handoff; only startup
