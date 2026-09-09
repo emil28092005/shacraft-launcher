@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, rejects } from 'node:assert/strict'
 import { test } from 'node:test'
-import { createRequestScope, createSerialQueue, createSubscription, errorMessage, singleFlight } from './async.ts'
+import { createSaveIntent, createRequestScope, createSerialQueue, createSubscription, errorMessage, singleFlight } from './async.ts'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -110,4 +110,51 @@ test('logout or a newer challenge invalidates a delayed account/link response', 
   const belongsToNewChallenge = requests.capture()
   equal(belongsToNewChallenge(), true)
   equal(belongsToAccount(), false)
+})
+
+
+test('RAM retry retains the failed 8 GB choice after rollback to durable 6 GB', async () => {
+  const intent = createSaveIntent<{ memoryMb: number }>()
+  const queue = createSerialQueue()
+  let current = { memoryMb: 6 * 1024 }
+  let durable = current
+  const writes: number[] = []
+  const save = async (next: typeof current, fail: boolean) => {
+    current = next
+    const request = intent.begin(next)
+    try {
+      const value = await queue.enqueue(async () => {
+        writes.push(next.memoryMb)
+        if (fail) throw new Error('disk full')
+        return next
+      })
+      durable = value
+      intent.succeeded(request)
+    } catch {
+      intent.failed(request)
+      current = durable
+    }
+  }
+  await save({ memoryMb: 8 * 1024 }, true)
+  equal(current.memoryMb, 6 * 1024)
+  await save(intent.retryValue()!, false)
+  deepStrictEqual(writes, [8 * 1024, 8 * 1024])
+  equal(durable.memoryMb, 8 * 1024)
+  equal(intent.retryValue(), null)
+})
+
+test('older settings failure cannot replace a newer choice or remain retryable after success', () => {
+  const intent = createSaveIntent<number>()
+  const older = intent.begin(8)
+  const newer = intent.begin(10)
+  intent.failed(older)
+  equal(intent.retryValue(), null)
+  intent.failed(newer)
+  equal(intent.retryValue(), 10)
+  const latest = intent.begin(12)
+  intent.succeeded(older)
+  intent.failed(latest)
+  equal(intent.retryValue(), 12)
+  intent.succeeded(latest)
+  equal(intent.retryValue(), null)
 })

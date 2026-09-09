@@ -44,6 +44,19 @@ export function createSerialQueue() {
   }
 }
 
+/** Retain the latest failed user choice even when UI rolls back to disk state. */
+export function createSaveIntent<T>() {
+  let revision = 0
+  let failed: T | null = null
+  return {
+    begin: (value: T) => { failed = null; return { revision: ++revision, value } },
+    isLatest: (request: { revision: number }) => request.revision === revision,
+    succeeded: (request: { revision: number }) => { if (request.revision === revision) failed = null },
+    failed: (request: { revision: number; value: T }) => { if (request.revision === revision) failed = request.value },
+    retryValue: () => failed,
+  }
+}
+
 /** Handles unmount before asynchronous native listener registration finishes. */
 export function createSubscription(
   registrations: readonly Promise<() => void>[],
