@@ -110,7 +110,10 @@ Hostile same-user TOCTOU is outside this protection; it is not an OS sandbox.
 
 `npm test` covers asynchronous helpers and state transitions;
 `npm run build` runs strict TypeScript before Vite. `cargo test --locked`
-covers native policy and storage. Push/PR CI repeats checks on Linux.
+covers native policy and storage. Push/PR CI repeats checks on Linux. Ubuntu 22.04
+CI installs desktop dependencies from the runner main distro source list only,
+without indexing unrelated vendor repositories. APT signature/hash checks remain
+mandatory, and any distro index failure stops installation.
 The package workflow builds and checks Windows x64, Linux x64 and both macOS
 architectures with disposable test signing keys. These artifacts cannot be
 published as production updater releases. Separate protected workflows assemble
