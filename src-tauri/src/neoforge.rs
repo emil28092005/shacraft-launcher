@@ -459,8 +459,10 @@ mod tests {
         use crate::{java, mojang};
 
         let client = Client::builder().build().unwrap();
-        let root =
-            std::env::temp_dir().join(format!("shacraft-neoforge-pipeline-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("shacraft-neoforge-pipeline-{}", std::process::id()));
         let game_dir = root.join("game");
         let cache_dir = root.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();

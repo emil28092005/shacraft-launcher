@@ -54,13 +54,19 @@ jobs:
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          # Ubuntu 22.04 keeps distro sources here; unrelated vendor repos are not needed.
+          test -s /etc/apt/sources.list
+          apt_options=(
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list
+            -o Dir::Etc::sourceparts=-
+          )
+          sudo apt-get "${apt_options[@]}" --error-on=any update
+          sudo apt-get "${apt_options[@]}" install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: npm ci
       - run: npm test
-      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: cargo build --locked --release --manifest-path scripts/release-verifier/Cargo.toml
       - run: python -m unittest discover -s scripts -p 'release_test.py' -v
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Generate disposable CI key (never a production secret)
         run: |
           python scripts/release.py ci-key --directory "$RUNNER_TEMP/ci-updater"

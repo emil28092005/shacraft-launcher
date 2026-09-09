@@ -109,6 +109,8 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 - `docs/game-trust-boundary.md` — the Mojang/NeoForge/Microsoft/Adoptium
   trust domains used to install and run the game itself.
 - `.github/workflows/check.yml` — push/PR UI checks and Linux Rust tests.
+  Ubuntu 22.04 dependency steps use only the runner main Ubuntu source list;
+  keep APT signature/hash checks and fail on index errors. Vendor PPAs are not needed.
 - `.github/workflows/build.yml` — four-platform CI packages with disposable test
   signing keys, explicitly unusable as production releases.
 - Release workflows and `scripts/release.py` implement protected draft → publish

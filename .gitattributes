@@ -1,0 +1,2 @@
+# Signed updater fixtures must retain their exact committed bytes on every OS.
+src-tauri/tests/fixtures/updater/* -text

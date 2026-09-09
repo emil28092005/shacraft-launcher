@@ -272,7 +272,7 @@ mod tests {
     #[test]
     #[ignore = "downloads the real pack/game and executes the official installer; needs network and Java 21"]
     fn live_cold_install_and_corruption_repair() {
-        let directory = std::env::temp_dir().join(format!(
+        let directory = std::env::temp_dir().canonicalize().unwrap().join(format!(
             "shacraft-cold-install-{}",
             SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
