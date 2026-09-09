@@ -47,10 +47,13 @@ pub(crate) async fn get_server_status(profile_id: String) -> Result<remote::Serv
 #[tauri::command]
 pub(crate) async fn inspect_remote_profile(
     app: AppHandle,
+    state: State<'_, LauncherOperations>,
     profile_id: String,
 ) -> Result<profile::ProfileInspection, String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         // Inspection must not report a partially applied journal as ready.
         let _lock = InstallationLock::acquire(&directory)?;
         let manifest = remote::fetch_manifest(&profile_id).map_err(|e| e.to_string())?;
@@ -68,8 +71,10 @@ pub(crate) async fn sync_remote_profile(
     profile_id: String,
 ) -> Result<profile::SyncResult, String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     let permit = state.installation.acquire("Installation")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         let _lock = InstallationLock::acquire(&directory)?;
         let snapshot = remote::fetch_snapshot(&profile_id).map_err(|e| e.to_string())?;
@@ -86,10 +91,13 @@ pub(crate) async fn sync_remote_profile(
 #[tauri::command]
 pub(crate) async fn legacy_mods(
     app: AppHandle,
+    state: State<'_, LauncherOperations>,
     profile_id: String,
 ) -> Result<Vec<profile::LegacyMod>, String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _lock = InstallationLock::acquire(&directory)?;
         let manifest = remote::fetch_manifest(&profile_id).map_err(|e| e.to_string())?;
         profile::list_legacy_mods(&directory.join("profiles").join(&manifest.id), &manifest)
@@ -107,8 +115,10 @@ pub(crate) async fn backup_legacy_mods(
     selections: Vec<profile::LegacySelection>,
 ) -> Result<profile::LegacyBackup, String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     let permit = state.installation.acquire("Legacy migration")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         let _lock = InstallationLock::acquire(&directory)?;
         let manifest = remote::fetch_manifest(&profile_id).map_err(|e| e.to_string())?;

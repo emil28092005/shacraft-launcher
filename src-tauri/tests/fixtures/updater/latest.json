@@ -1,0 +1,59 @@
+{
+  "manualPackages": {
+    "darwin-aarch64-dmg": {
+      "sha256": "409ed0537cccf2724f405fd0031f6e84718442b263b75513532e03ecc991a678",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheUlYSjNaNG55a084WTlCTFlhQTdOdlNNZ3JYYjNaeXZLOThXWERjN3kwWkRtcnNCN0NMVDJBOEpUdVVlS2JJYkpZc3dkdWtyOXQvQ2k3dGJ1bldyRXc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzIwCWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfZGFyd2luLWFhcmNoNjQuZG1nCnRnRlh2dnFUdnJ1MG4vTTF6SExvNzk3ZVpvUkZ5Nk0vdjRiSFpiaHFZUkw5a3N4TkkyODV3RDY0MmJyTXpNdFUwL1NBSlluTG5WeVlMdE1xa3pkWUNnPT0K",
+      "size": 97,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_darwin-aarch64.dmg"
+    },
+    "darwin-x86_64-dmg": {
+      "sha256": "70496d49bf410231a2575c384a306023ab5eeaf312d4dd93b6e8aed3e2ee9492",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheUJ2biswTzY5QmNNU2hmRHVRV2xpUEtBay94SW1NdHArVnJDQmhLZ3N4UEVQSkxJbG92dmF1bSt4RmJkSm0wOExzNlRDUHJJaVpEUWZvVGoxd0NkNFFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzIwCWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfZGFyd2luLXg4Nl82NC5kbWcKVEFaRkxCUFlSRUQ1T0NOa0doclVucnVLNWw0STcxV05ybkxvcWNrazlPdGVEdU5FTlVlMTFSNFlTUEV1RUNvREZqTFZ0UlN3MTJRcGttQWpxblZUQUE9PQo=",
+      "size": 96,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_darwin-x86_64.dmg"
+    },
+    "linux-x86_64-deb": {
+      "sha256": "cefbadc09d008ff4b0f26ee788f524644b7dadf9de4549bd8d841e44ad92e292",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheU9BMWNrS1hCWHdJWlNFczFJNklxMDJsdHMwZ1NFakpxTDExS0xFUXVwWVFRTVh3Q2Vpc0MvUEI4NXZmTjJjMnZaRFoydVk1SHdMSkkwNFRqMkZIUUFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzE5CWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfbGludXgteDg2XzY0LmRlYgpjMVZYeVJuUEZWWithQ2lFVHdkWXBqMDA4NGlKT3FYL3djclhyK1hTSE1RVzVrN0p6TVV1V3plOFlKZHQ5K1pzWDMzcmtPYWFPaCtZeEE4WWt6cW5EZz09Cg==",
+      "size": 95,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_linux-x86_64.deb"
+    },
+    "windows-x86_64-msi": {
+      "sha256": "fac4bdeb3c95d4c0a91b5f03215a0dd8f3e676b7e7f9140eef1616d2fefa5c4b",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheUdYODluWEtUd2RGNUVyRzNTQWpNV1VoOXpFaXVCZ05SbUpwQTQzYnU2WmI0bzIxVTBTdXFNN2p0Z3NYRndhNmlqTGFzRkZiYllhb0pzbFN4UkMrUUFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzE5CWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfd2luZG93cy14ODZfNjQubXNpClZxRlZTL2NobmcreDBLVnc5QzdyZHRkS01NVVZOY2ZpcDNBTWcvUGt6dm15bUNTUzEra09RRDk1Z1VWbmwyU1NjblFXQ0NCcXhTUlpnUEpocWpqQkRRPT0K",
+      "size": 97,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_windows-x86_64.msi"
+    }
+  },
+  "notes": "Synthetic test metadata.",
+  "platforms": {
+    "darwin-aarch64": {
+      "sha256": "73f3eea52be58fb872d2f6423f5cc604b1599403a556a2208173f8b3ea1e66cb",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheVBPN2xlbzEyQ3h2SkRCdzNlUnFxVEhzQjNYRGNNT1B2enc5TUxKQ1U5TDdwaGhkOUxqNTRnZ3FheDN6UE82SWpMR0YvQUZQR255bWRZcTdYYy9qMWdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzE5CWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfZGFyd2luLWFhcmNoNjQuYXBwLnRhci5negp5ckVPVnhvSE1yNitYZm9SRi9KRVNjTWhMVUY3dnNDYmViSHNSWmE2TlFpOVJqd2RxZVJuY0NqVHd6UU5PYUt2NXVQN1JKSHlhZVdiY3JvTjdLcUZCQT09Cg==",
+      "size": 104,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_darwin-aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "sha256": "548d2042689d797dbcb29f09d206e1c36814880a831a26945bf0c550f2617a64",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheVB5MVRuUU52OEdLZDJHYWhmMUtWaDNQMnM0U0xCcC9sdkE0TWhSK0svNzRuTVBtVW5NUTh6MEQ5amVKd0Vpa1l4cWZ2YzNtWW41Y0RQV0VrTitUbVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzE5CWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfZGFyd2luLXg4Nl82NC5hcHAudGFyLmd6ClFuY3IwOXZKaWsrUTIwMGZmTFdFZmh2K3ZEcDAzYXBpSi8wVnJNS05Zb25YdVgyd1IzLzZud1JqaFNHdXZwa0FpclEyQnplZTFjR1RqNUpzQm9qdUJnPT0K",
+      "size": 103,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_darwin-x86_64.app.tar.gz"
+    },
+    "linux-x86_64": {
+      "sha256": "150e75098117b452b56bfd3925e2c6af03129b47e17be4529f4498b17a9ce9ae",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheUh1Znd0d2k0c3VGd085c3N2RWVmZnliem04Tzc4MjBaOE1Sd1NWdU9pNU9zZjlMZWNoRnBxaDN6eGlER0hxTDVyRUtVdXdjOUhWK29oM1hSSC84Qmc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzIwCWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfbGludXgteDg2XzY0LkFwcEltYWdlCmdFZTNDdmt0ckRySnB3NWtBeUdYV3drSVZidmNKZEpsOGptcERGK0VjQmpUUDU0c1ZWV1diTWVTZTlhRzVnUVJFRlVITVNhVGxrbS8rMkdTREtUQUNBPT0K",
+      "size": 100,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_linux-x86_64.AppImage"
+    },
+    "windows-x86_64": {
+      "sha256": "a9773409a6545e98af6a9aad2de2b7d89be257c33af6566bd7ffefc1f443d1be",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRcmJOMjVQU1ZheUduVjJYSS83QzVIMXRBK0ZabHk1UGxZMUxkNVkzYXE4VXgranlqRnluSlhOdlBBWU5qaTB5MmQySTZ6M3pZMmZHNHI4dkZpRzk2Q2NXWS9GbXJ2N3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTcwNzIwCWZpbGU6c2hhY3JhZnQtbGF1bmNoZXJfMC4zLjBfd2luZG93cy14ODZfNjQtc2V0dXAuZXhlCmlneXpmSGc0WlM3STgxTHUzbldxdVpqbjhraUp6K1c3djhQSWdmOHh0WTFwMnB2cmIwMHdjMVVOajJKVWR0MTVwTTBYd0NvYUk1OVVuemRUakh3SkJBPT0K",
+      "size": 103,
+      "url": "https://github.com/emil28092005/shacraft-launcher/releases/download/v0.3.0/shacraft-launcher_0.3.0_windows-x86_64-setup.exe"
+    }
+  },
+  "pub_date": "2026-09-09T00:00:00Z",
+  "schemaVersion": 1,
+  "tag": "v0.3.0",
+  "version": "0.3.0"
+}

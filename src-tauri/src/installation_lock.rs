@@ -71,6 +71,16 @@ pub(crate) struct InstallationLock {
     lease: PathBuf,
 }
 
+impl Drop for InstallationLock {
+    fn drop(&mut self) {
+        // A concurrent Unix spawn can retain an inherited copy until exec.
+        // Release this owner's lock explicitly instead of waiting for every
+        // duplicate descriptor to close. Never remove the durable game lease.
+        // If unlock fails, closing the file still leaves the OS fail-closed.
+        let _ = self._file.unlock();
+    }
+}
+
 impl InstallationLock {
     pub fn acquire(data_dir: &Path) -> Result<Self, String> {
         ordinary_path(data_dir)?;
@@ -166,7 +176,10 @@ mod tests {
         let a = InstallationLock::acquire(&p).unwrap();
         assert!(InstallationLock::acquire(&p).is_err());
         drop(a);
-        assert!(InstallationLock::acquire(&p).is_ok());
+        drop(
+            InstallationLock::acquire(&p)
+                .unwrap_or_else(|error| panic!("expected released lock: {error}")),
+        );
         fs::remove_dir_all(p).unwrap();
     }
     #[test]
@@ -176,9 +189,8 @@ mod tests {
         a.starting().unwrap();
         a.running(std::process::id()).unwrap();
         drop(a);
-        assert!(InstallationLock::acquire(&p)
-            .unwrap_err_string()
-            .contains("Minecraft"));
+        let error = InstallationLock::acquire(&p).unwrap_err_string();
+        assert!(error.contains("Minecraft"), "unexpected refusal: {error}");
         fs::remove_dir_all(p).unwrap();
     }
     #[test]
@@ -193,9 +205,52 @@ mod tests {
         })
         .unwrap();
         drop(a);
-        assert!(InstallationLock::acquire(&p).is_ok());
+        drop(
+            InstallationLock::acquire(&p)
+                .unwrap_or_else(|error| panic!("expected released lock: {error}")),
+        );
         fs::remove_dir_all(p).unwrap();
     }
+    #[test]
+    fn inherited_file_description_does_not_extend_owner_guard_lifetime() {
+        let p = dir();
+        let guard = InstallationLock::acquire(&p).unwrap();
+        guard
+            .store(&Lease::Running {
+                game: ProcessIdentity {
+                    pid: std::process::id(),
+                    started: 1,
+                },
+            })
+            .unwrap();
+        // A concurrent Unix spawn inherits this same open file description
+        // until exec closes its CLOEXEC copy. try_clone deterministically keeps
+        // that description alive without relying on fork timing or sleeps.
+        let inherited = guard._file.try_clone().unwrap();
+        assert!(InstallationLock::acquire(&p).is_err());
+        drop(guard);
+        let reacquired = InstallationLock::acquire(&p)
+            .unwrap_or_else(|error| panic!("owner dropped but lock remained: {error}"));
+        assert!(!p.join("installation-state/game-lease.json").exists());
+        drop(inherited);
+        drop(reacquired);
+        fs::remove_dir_all(p).unwrap();
+    }
+
+    #[test]
+    fn releasing_owner_lock_keeps_live_game_lease_with_inherited_description() {
+        let p = dir();
+        let guard = InstallationLock::acquire(&p).unwrap();
+        guard.running(std::process::id()).unwrap();
+        let inherited = guard._file.try_clone().unwrap();
+        drop(guard);
+        let error = InstallationLock::acquire(&p).unwrap_err_string();
+        assert!(error.contains("Minecraft"), "unexpected refusal: {error}");
+        assert!(p.join("installation-state/game-lease.json").exists());
+        drop(inherited);
+        fs::remove_dir_all(p).unwrap();
+    }
+
     #[test]
     fn interrupted_spawn_fails_closed() {
         let p = dir();

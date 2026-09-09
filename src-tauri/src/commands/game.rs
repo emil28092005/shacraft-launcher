@@ -151,8 +151,10 @@ pub(crate) async fn ensure_game_installed(
     profile_id: String,
 ) -> Result<PreparationResult, String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     let permit = state.installation.acquire("Installation")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         let _lock = InstallationLock::acquire(&directory)?;
         let snapshot = remote::fetch_snapshot(&profile_id).map_err(|e| e.to_string())?;
@@ -181,9 +183,11 @@ async fn play(
     onboarding_name: Option<String>,
 ) -> Result<PreparationResult, String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     let permit = state.installation.acquire("Installation")?;
     let account_operation = state.shacraft_account.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         let lock = InstallationLock::acquire(&directory)?;
         let snapshot = remote::fetch_snapshot(&profile_id).map_err(|e| e.to_string())?;

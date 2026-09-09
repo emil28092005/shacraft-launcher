@@ -56,6 +56,16 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   requires LoginSystem authentication and an explicit one-time proof command.
   Existing links retain legacy provenance; status polling cannot create links.
 
+- Launcher self-update is a separate trust domain in `updater.rs` and
+  `updater/protocol.rs`: the fixed GitHub repository's `latest.json` bytes are
+  authenticated with the pinned Tauri/minisign public key before JSON parsing.
+  Each exact version/platform artifact also requires that signature, SHA-256
+  and size. Never reuse the ShaCraft mod-manifest key or accept IPC URLs/keys.
+- `update_guard.rs` retains one launcher-instance OS lock, drains native writes
+  through `operations::Lifecycle`, and checks the existing detached-game lease.
+  `launcher-state/pending-update.json` survives installer handoff; only startup
+  of its exact target version acknowledges it. Never clear it on a timer.
+
 ## Layout
 
 - `src/main.tsx` — React entrypoint; `src/App.tsx` composes the screen.
@@ -68,7 +78,7 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   - `lib.rs` — module/command registration only; `commands/` holds adapters
     for account/game/host/preferences/profiles. Unsigned sync/inspect IPC was
     removed; only verified remote manifests may drive profile mutations.
-  - `operations.rs` — process-local install/account permits owned by workers.
+  - `operations.rs` — lifecycle and install/account permits owned by workers.
     Launch must use the authenticated ShaCraft nickname; no settings fallback.
   - `storage.rs` — unique same-directory atomic writes, owner-only Unix files.
   - `trusted_http.rs` — HTTPS and exact-host redirect policy per game provider.
@@ -96,8 +106,13 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 - `docs/game-trust-boundary.md` — the Mojang/NeoForge/Microsoft/Adoptium
   trust domains used to install and run the game itself.
 - `.github/workflows/check.yml` — push/PR UI checks and Linux Rust tests.
-- `.github/workflows/build.yml` — main-push/manual cross-platform builds with artifacts;
-  not a signed release or updater publication.
+- `.github/workflows/build.yml` — four-platform CI packages with disposable test
+  signing keys, explicitly unusable as production releases.
+- Release workflows and `scripts/release.py` implement protected draft → publish
+  gates; see `docs/updater-release.md`. Never publish assets piecemeal, reuse CI
+  test keys, or confuse updater signatures with OS signing/notarization.
+- `src-tauri/updater-public-key.txt` is the public production trust root.
+  Private updater keys remain outside all repositories; never commit them.
 
 ## Verification
 

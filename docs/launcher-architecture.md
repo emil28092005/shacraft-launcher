@@ -13,9 +13,13 @@ The interface also shows a live Aeronautics player count from the fixed,
 read-only `https://shacraft.ru/api/online/aoc` endpoint. It is display-only:
 the result never controls files, versions, URLs, or the launch command.
 
-Not yet implemented: a user-selectable profile directory, a "reset managed
-files only" recovery action, and signed cross-platform release builds of the
-launcher itself. Do not represent these as completed in UI or release notes.
+The launcher also checks signed GitHub releases for its own updates. AppImage,
+Windows x64 installers and native Intel/Apple Silicon macOS app bundles use
+explicit install-and-restart; Debian packages use manual package management.
+Production publication and OS signing/notarization require operator setup;
+see `updater-release.md`. Version 0.1.1 has no updater and must be upgraded
+manually once. User-selectable profile directories and managed-only reset
+remain unimplemented.
 
 ## Data flow
 
@@ -71,7 +75,7 @@ be the system `.minecraft` directory.
 1. User-selectable profile directory and structured launcher logs.
 2. "Reset managed files only" recovery action that doesn't touch player
    worlds/screenshots/resourcepacks.
-3. Signed, cross-platform release builds of the launcher itself.
+3. Production release credentials/protected environments and OS beta validation.
 4. Cancellation, structured logs and a full cold-install/recovery beta on
    every target OS. Install progress reports bytes or installer work counts
    depending on the stage; these units are not interchangeable.
@@ -107,10 +111,12 @@ Hostile same-user TOCTOU is outside this protection; it is not an OS sandbox.
 `npm test` covers asynchronous helpers and state transitions;
 `npm run build` runs strict TypeScript before Vite. `cargo test --locked`
 covers native policy and storage. Push/PR CI repeats checks on Linux.
-The package workflow runs on main pushes or manually and builds Windows
-x64, Linux x64 and both macOS architectures with named artifacts.
-Packages are not yet signed release artifacts. Native cold-install and
-launch tests are required before calling a platform release-ready.
+The package workflow builds and checks Windows x64, Linux x64 and both macOS
+architectures with disposable test signing keys. These artifacts cannot be
+published as production updater releases. Separate protected workflows assemble
+a complete signed release as a draft, re-verify its assets and only then publish.
+Native cold-install, real self-update and launch tests are required before
+calling a platform release-ready. CI package builds do not prove those flows.
 
 
 ## Reconciliation and recovery
@@ -195,3 +201,56 @@ both and repeats a healthy check. It never logs into a game server. It requires
 network access and sufficient disk space; the printed directory is retained
 for diagnosis. This does not replace Tauri IPC, graphical gameplay or the
 client/server proof matrix on each supported OS.
+
+
+## Launcher self-update boundary (0.2.0)
+
+`updater/protocol.rs` pins `github.com/emil28092005/shacraft-launcher/releases`.
+The exact raw `latest.json` response is verified using its detached minisign
+signature and the committed updater public key before versions, URLs or notes
+are parsed. This key is independent of ShaCraft's Ed25519 mod manifest. Signed
+metadata binds a stable version and tag to an exact set of four platform and
+four manual package descriptors; every descriptor has an exact repository/tag/
+filename, size, SHA-256 and Tauri signature. HTTPS redirects are restricted to
+that repository and GitHub's release asset CDN. Stable downgrades, unknown
+platforms, missing signatures and incomplete metadata fail closed.
+
+Only native commands check, download, install and open the fixed releases page.
+The webview supplies no URLs, public keys, executable arguments, release version
+or arbitrary file path. No generic updater plugin permission is granted to it.
+The packaged native architecture selects the artifact: Windows preserves MSI
+versus NSIS, macOS preserves Intel versus Apple Silicon, Linux only replaces an
+AppImage. A Debian installation requires the user's package manager.
+
+Checks run once per application UI lifecycle and on explicit request. They do
+not install automatically. The settings drawer shows installed/available
+versions, plain-text notes, progress, actionable errors and retry. The explicit
+install button includes restart. UI session recovery codes, unsaved/failed
+settings and account/game operations inhibit that action; native permits are
+the final authority for concurrent writes. Preferences, sessions and game data
+live outside the executable and are not migrated or erased by the updater.
+
+`launcher-state/instance.lock` is a process-lifetime OS lock, preventing an idle
+second cooperating launcher from retaining old code during replacement. All
+native account/settings/game writes hold shared lifecycle permits. Replacement
+holds the exclusive permit and `installation-state/writer.lock`, which also
+checks a game process's durable PID/start-time lease. A normal window close is
+inhibited during download/install. Worker permits survive a dropped IPC future.
+Before invoking the platform installer, `pending-update.json` records current
+and target versions. The Windows plugin hands off and exits; the marker remains.
+Only startup of the exact target version clears it. Old versions and indeterminate
+installer failures block native mutations and direct the user to manual recovery.
+A corrupt marker opens recovery diagnostics and latches the mutation/launch ban
+until application restart, even if that file is removed while the UI is open.
+No guessed installer timeout
+releases the gate. This cannot retroactively make old 0.1.1 binaries cooperate
+with these locks.
+
+First metadata/signature and artifact reads are bounded. Tauri updater 2.11.0
+requires its own second check to construct a private installer context; that
+check uses the fixed version endpoint, HTTPS host policy and a 30-second timeout,
+and its parsed metadata must equal the previously authenticated document.
+The plugin's secondary response has no byte-limit API, leaving a memory-use
+risk if that trusted release endpoint serves an unexpectedly large response.
+Immediately before install, native code re-verifies artifact size/hash/signature;
+`Update::install` alone does not perform signature verification.

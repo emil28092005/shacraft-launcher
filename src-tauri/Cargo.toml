@@ -1,6 +1,6 @@
 [package]
 name = "shacraft-launcher"
-version = "0.1.1"
+version = "0.2.0"
 description = "ShaCraft Minecraft launcher"
 authors = ["ShaCraft"]
 license = "MIT"
@@ -28,3 +28,9 @@ flate2 = "1"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+
+tauri-plugin-updater = { version = "=2.11.0", default-features = false, features = ["rustls-tls"] }
+minisign-verify = "=0.2.5"
+semver = "1"
+time = { version = "0.3", features = ["parsing", "formatting"] }
+reqwest-updater = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls-no-provider"] }

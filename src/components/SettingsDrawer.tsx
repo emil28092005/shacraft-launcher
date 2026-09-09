@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { FolderOpen, Wrench, X } from 'lucide-react'
 import { AccountSettings } from './AccountSettings'
+import { LauncherUpdate } from './LauncherUpdate'
+import type { useUpdater } from '../hooks/useUpdater'
 import type { useAccount } from '../hooks/useAccount'
 import type { useSettings } from '../hooks/useSettings'
 import type { JavaInstallation, NativeHost } from '../types/launcher'
@@ -15,9 +17,11 @@ interface SettingsDrawerProps {
   onClose: () => void
   requiredJava?: number
   onOnboard?: (nickname: string) => Promise<void>
+  updater: ReturnType<typeof useUpdater>
+  native: boolean
 }
 
-export function SettingsDrawer({ open, locked, host, java, preferences, session, onClose, requiredJava, onOnboard }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, locked, host, java, preferences, session, onClose, requiredJava, onOnboard, updater, native }: SettingsDrawerProps) {
   const { settings, loaded, saving, error } = preferences
   const closeButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -27,7 +31,9 @@ export function SettingsDrawer({ open, locked, host, java, preferences, session,
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
       if (event.key !== 'Tab') return
-      const elements = closeButton.current?.closest('aside')?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)')
+      const elements = Array.from(closeButton.current?.closest('aside')?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex="0"]',
+      ) ?? []).filter((element) => element.getClientRects().length > 0)
       const first = elements?.[0]
       const last = elements?.[elements.length - 1]
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
@@ -49,6 +55,8 @@ export function SettingsDrawer({ open, locked, host, java, preferences, session,
           <div><p>Настройки</p><h2 id="settings-title">Игра</h2></div>
           <button ref={closeButton} onClick={onClose} aria-label="Закрыть настройки"><X /></button>
         </div>
+        <LauncherUpdate state={updater.state} native={native} installedVersion={host?.launcherVersion}
+          onCheck={updater.check} onInstall={updater.install} onRestart={updater.restart} onOpenRelease={updater.openRelease} />
         <label className="range-setting">
           <span><strong>Оперативная память</strong><b>{settings.memoryMb / 1024} ГБ</b></span>
           <input type="range" min="3" max="12" step="1" value={settings.memoryMb / 1024} disabled={!loaded || locked}
