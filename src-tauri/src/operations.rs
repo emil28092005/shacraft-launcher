@@ -11,6 +11,7 @@ use std::sync::{
 pub(crate) struct LauncherOperations {
     pub installation: Operation,
     pub account: Operation,
+    pub shacraft_account: Operation,
 }
 
 #[derive(Clone, Default)]

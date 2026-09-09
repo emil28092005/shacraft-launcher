@@ -33,10 +33,14 @@ real main class is `net.minecraftforge.installer.SimpleInstaller`, which
 supports this flag. **Empirically verified (2026-09-06)**: it refuses to
 target a directory unless a `launcher_profiles.json` stub already exists
 there ("you need to run the launcher first!") — `ensure_launcher_profiles_stub`
-writes a minimal one. It then fetches and patches vanilla itself; no
-pre-seeding needed. Its own downloads go straight to `maven.neoforged.net`/
-Mojang, outside our control — an accepted trust delegation to NeoForge's
-official tooling once the installer binary itself is verified.
+writes a minimal one. It fetches the inputs needed to patch vanilla, but does
+not guarantee that the complete vanilla runtime library set is present.
+After installation, `mojang::ensure_client_jar` and `ensure_libraries` always
+verify and download the complete merged launch set, including LWJGL and its
+platform natives. The installer's own downloads go straight to
+`maven.neoforged.net`/Mojang, outside our control — an accepted trust
+delegation to NeoForge's official tooling once the installer binary itself is
+verified.
 
 Also verified: the resulting
 `libraries/net/neoforged/neoforge/<ver>/neoforge-<ver>-client.jar` (the
@@ -53,10 +57,13 @@ own on disk, confirmed).
 Hosts: `login.microsoftonline.com`, `user.auth.xboxlive.com`,
 `xsts.auth.xboxlive.com`, `api.minecraftservices.com`.
 
-Real device-code OAuth login -> Xbox Live user token -> XSTS token ->
-Minecraft Services login -> `GET /minecraft/profile` ownership check (404 =
-doesn't own the game = nothing installs or launches). This is the actual
-ownership gate; it is not optional and there is no fallback identity. See
+This module is retained for a future Microsoft mode; the current launcher
+uses authenticated ShaCraft account links and deterministic offline identity.
+Do not treat this unused module as the active launch gate.
+
+In a Microsoft flow: device-code OAuth -> Xbox Live user token -> XSTS token ->
+Minecraft Services login -> `GET /minecraft/profile` ownership check. An
+authentication/ownership failure must never fall back to another identity. See
 `MSA_CLIENT_ID`'s doc comment in `msa.rs`: unlike the other three domains,
 this one needs a deployment-specific value — ShaCraft's own Azure AD app
 registration, approved for Minecraft API access via
@@ -66,13 +73,14 @@ refuse to run while it's still the placeholder.
 ## 4. Eclipse Adoptium (`runtime.rs`)
 
 Host: `api.adoptium.net` (redirects to `github.com`/
-`objects.githubusercontent.com` for the actual download — expected, still
+`objects.githubusercontent.com`/`release-assets.githubusercontent.com` for the download — expected, still
 verified).
 
 Java 21 JRE, GPLv2+CE. The API returns the release's SHA-256 inline, verified
 before extraction. Never touches a Java installation the user already has —
 `java::ensure_java` only provisions here when `java::detect()` finds nothing
-with at least the manifest's `javaMajor`.
+with exactly the manifest's `javaMajor`; a newer major is not assumed
+compatible with the Minecraft/NeoForge version.
 
 ## Why this separation matters
 

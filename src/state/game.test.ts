@@ -14,6 +14,17 @@ test('installation, running game and exit have distinct states', () => {
   deepStrictEqual(gameReducer(running, { type: 'exited', result: { profileId, exitCode: 0 } }), initialGameState)
 })
 
+test('every launch can reconcile the modpack before installation and process spawn', () => {
+  const syncing = gameReducer(initialGameState, { type: 'sync', profileId })
+  equal(syncing.operation.phase, 'syncing')
+  const synced = gameReducer(syncing, { type: 'synced', profileId })
+  const installingAfterSync = gameReducer(synced, { type: 'install', profileId })
+  equal(installingAfterSync.operation.phase, 'installing')
+  const launchingAfterInstall = gameReducer(installingAfterSync, { type: 'launch', profileId })
+  equal(launchingAfterInstall.operation.phase, 'launching')
+  equal(gameReducer(launchingAfterInstall, { type: 'started', profileId }).operation.phase, 'running')
+})
+
 test('a fast child exit cannot be overwritten by a late launch acknowledgement', () => {
   const exited = gameReducer(launching, { type: 'exited', result: { profileId, exitCode: 1 } })
   const lateAcknowledgement = gameReducer(exited, { type: 'started', profileId })

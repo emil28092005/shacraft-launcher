@@ -254,6 +254,27 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn preserves_changed_seed_files_as_current() {
+        let root = std::env::temp_dir().join(format!(
+            "shacraft-launcher-seed-test-{}-{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut expected = manifest("0".repeat(64), 42);
+        expected.files[0].policy = FilePolicy::Seed;
+        fs::create_dir_all(root.join("mods")).unwrap();
+        fs::write(root.join("mods/example.jar"), b"player customization").unwrap();
+        let inspection = inspect(&root, &expected).unwrap();
+        assert_eq!(inspection.missing_files, 0);
+        assert_eq!(inspection.mismatched_files, 0);
+        assert!(inspection.up_to_date);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn refuses_linked_profile_directories() {

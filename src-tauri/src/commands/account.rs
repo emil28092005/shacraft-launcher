@@ -1,11 +1,6 @@
 use super::data_dir;
-use crate::{
-    msa,
-    operations::{LauncherOperations, Operation},
-    session, settings,
-};
+use crate::{msa, operations::LauncherOperations};
 use serde::Serialize;
-use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
 #[derive(Clone, Serialize)]
@@ -115,54 +110,4 @@ pub(crate) async fn logout(
     .await
     .map_err(|error| format!("Logout task failed: {error}"))?
     .map_err(|error| error.to_string())
-}
-
-/// Resolves the identity to launch as, based on the persisted `account_mode`.
-/// In `Microsoft` mode this requires a real signed-in session (see
-/// `msa::login_with_refresh_token`) and returns an error if there is none;
-/// in `Offline` mode it uses the local nickname from settings, so no
-/// Microsoft account is needed at all. Offline is never silently used in
-/// place of a missing Microsoft session.
-pub(super) fn resolve_identity(
-    data_dir: &Path,
-    settings: &settings::LauncherSettings,
-    account_operation: &Operation,
-) -> Result<session::PlayerIdentity, String> {
-    match settings.account_mode {
-        settings::AccountMode::Offline => Ok(session::PlayerIdentity::Offline {
-            name: settings.nickname.clone(),
-        }),
-        settings::AccountMode::Microsoft => {
-            let _permit = account_operation.acquire("Account operation")?;
-            let client = msa::http_client().map_err(|error| error.to_string())?;
-            let refresh_token = msa::load_refresh_token(data_dir)
-                .ok_or("Not signed in with a Microsoft account")?;
-            let result = msa::login_with_refresh_token(&client, &refresh_token)
-                .map_err(|error| error.to_string())?;
-            msa::save_refresh_token(data_dir, &result.refresh_token)
-                .map_err(|error| error.to_string())?;
-            Ok(session::PlayerIdentity::Microsoft(result))
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn offline_identity_does_not_wait_for_microsoft_refresh() {
-        let operation = Operation::default();
-        let _refresh = operation.acquire("Account operation").unwrap();
-        let settings = settings::LauncherSettings::default();
-        let identity = resolve_identity(
-            Path::new("/unused-account-directory"),
-            &settings,
-            &operation,
-        )
-        .unwrap();
-        assert!(
-            matches!(identity, session::PlayerIdentity::Offline { name } if name == settings.nickname)
-        );
-    }
 }

@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, rejects } from 'node:assert/strict'
 import { test } from 'node:test'
-import { createSerialQueue, createSubscription, errorMessage, singleFlight } from './async.ts'
+import { createRequestScope, createSerialQueue, createSubscription, errorMessage, singleFlight } from './async.ts'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -94,4 +94,20 @@ test('failed account restore can be retried', async () => {
   await rejects(restore(), /network unavailable/)
   equal(await restore(), 'profile')
   equal(calls, 2)
+})
+
+test('logout or a newer challenge invalidates a delayed account/link response', async () => {
+  const requests = createRequestScope()
+  const response = deferred<string>()
+  const belongsToAccount = requests.capture()
+  let displayedAccount: string | null = 'signed in'
+  const polling = response.promise.then((account) => { if (belongsToAccount()) displayedAccount = account })
+  requests.invalidate()
+  displayedAccount = null
+  response.resolve('old linked account')
+  await polling
+  equal(displayedAccount, null)
+  const belongsToNewChallenge = requests.capture()
+  equal(belongsToNewChallenge(), true)
+  equal(belongsToAccount(), false)
 })

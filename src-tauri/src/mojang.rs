@@ -26,7 +26,8 @@ use std::{
     },
 };
 
-const VERSION_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const VERSION_MANIFEST_URL: &str =
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const MOJANG_HOSTS: [&str; 4] = [
     "piston-meta.mojang.com",
     "piston-data.mojang.com",
@@ -47,6 +48,28 @@ pub fn http_client() -> Result<Client, reqwest::Error> {
     crate::trusted_http::client(&MOJANG_HOSTS, std::time::Duration::from_secs(10 * 60))
 }
 
+/// The verified merged profile can contain both Mojang and NeoForge artifacts.
+/// This broader client is used only for that library list, never metadata.
+pub fn library_http_client() -> Result<Client, reqwest::Error> {
+    crate::trusted_http::client(
+        &[
+            MOJANG_HOSTS[0],
+            MOJANG_HOSTS[1],
+            MOJANG_HOSTS[2],
+            MOJANG_HOSTS[3],
+            crate::neoforge::NEOFORGE_HOST,
+        ],
+        std::time::Duration::from_secs(10 * 60),
+    )
+}
+
+/// Library entries in a merged loader profile may point at the loader's
+/// own fixed Maven. The profile itself comes from the SHA-256-verified
+/// NeoForge installer, never from the ShaCraft manifest.
+fn is_allowed_library_host(url: &str) -> bool {
+    is_allowed_host(url) || crate::neoforge::is_allowed_host(url)
+}
+
 #[derive(Debug)]
 pub enum MojangError {
     Network(reqwest::Error),
@@ -55,6 +78,7 @@ pub enum MojangError {
     ChecksumMismatch(String),
     DisallowedHost(String),
     MissingField(String),
+    ConflictingLibrary(String),
     Download(DownloadError),
     Io(io::Error),
 }
@@ -66,8 +90,14 @@ impl fmt::Display for MojangError {
             Self::HttpStatus(status) => write!(formatter, "Mojang returned {status}"),
             Self::InvalidJson(error) => write!(formatter, "invalid Mojang JSON: {error}"),
             Self::ChecksumMismatch(context) => write!(formatter, "checksum mismatch for {context}"),
-            Self::DisallowedHost(url) => write!(formatter, "URL is not a recognised Mojang host: {url}"),
+            Self::DisallowedHost(url) => {
+                write!(formatter, "URL is not a recognised Mojang host: {url}")
+            }
             Self::MissingField(field) => write!(formatter, "version JSON is missing {field}"),
+            Self::ConflictingLibrary(path) => write!(
+                formatter,
+                "merged version contains conflicting library entries for {path}"
+            ),
             Self::Download(error) => write!(formatter, "{error}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
         }
@@ -106,7 +136,10 @@ pub fn fetch_version_manifest(client: &Client) -> Result<VersionManifest, Mojang
     fetch_json(client, VERSION_MANIFEST_URL, None)
 }
 
-pub fn find_version<'a>(manifest: &'a VersionManifest, id: &str) -> Option<&'a VersionManifestEntry> {
+pub fn find_version<'a>(
+    manifest: &'a VersionManifest,
+    id: &str,
+) -> Option<&'a VersionManifestEntry> {
     manifest.versions.iter().find(|entry| entry.id == id)
 }
 
@@ -141,7 +174,10 @@ pub struct Arguments {
 #[serde(untagged)]
 pub enum ArgumentValue {
     Plain(String),
-    Conditional { rules: Vec<Rule>, value: StringOrList },
+    Conditional {
+        rules: Vec<Rule>,
+        value: StringOrList,
+    },
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -227,7 +263,11 @@ fn current_os_name() -> &'static str {
 }
 
 fn arch_matches(expected: &str) -> bool {
-    let normalized = if expected == "arm64" { "aarch64" } else { expected };
+    let normalized = if expected == "arm64" {
+        "aarch64"
+    } else {
+        expected
+    };
     normalized == std::env::consts::ARCH
 }
 
@@ -246,7 +286,9 @@ fn os_matches(os: &RuleOs) -> bool {
 }
 
 fn features_match(required: &HashMap<String, bool>, active: &HashMap<String, bool>) -> bool {
-    required.iter().all(|(key, value)| active.get(key).copied().unwrap_or(false) == *value)
+    required
+        .iter()
+        .all(|(key, value)| active.get(key).copied().unwrap_or(false) == *value)
 }
 
 /// Evaluates a Mojang-style rule list: no rules means always allowed;
@@ -261,7 +303,10 @@ pub fn rule_allows(rules: &[Rule], active_features: &HashMap<String, bool>) -> b
     let mut allowed = false;
     for rule in rules {
         let os_ok = rule.os.as_ref().is_none_or(os_matches);
-        let features_ok = rule.features.as_ref().is_none_or(|required| features_match(required, active_features));
+        let features_ok = rule
+            .features
+            .as_ref()
+            .is_none_or(|required| features_match(required, active_features));
         if os_ok && features_ok {
             allowed = rule.action == RuleAction::Allow;
         }
@@ -271,7 +316,10 @@ pub fn rule_allows(rules: &[Rule], active_features: &HashMap<String, bool>) -> b
 
 /// Flattens an argument list into plain strings, dropping conditional
 /// entries whose rules don't match this platform/feature set.
-pub fn resolve_arguments(arguments: &[ArgumentValue], active_features: &HashMap<String, bool>) -> Vec<String> {
+pub fn resolve_arguments(
+    arguments: &[ArgumentValue],
+    active_features: &HashMap<String, bool>,
+) -> Vec<String> {
     let mut resolved = Vec::new();
     for argument in arguments {
         match argument {
@@ -289,11 +337,18 @@ pub fn resolve_arguments(arguments: &[ArgumentValue], active_features: &HashMap<
     resolved
 }
 
-pub fn fetch_version_json(client: &Client, entry: &VersionManifestEntry) -> Result<VersionJson, MojangError> {
+pub fn fetch_version_json(
+    client: &Client,
+    entry: &VersionManifestEntry,
+) -> Result<VersionJson, MojangError> {
     fetch_json(client, &entry.url, Some(&entry.sha1))
 }
 
-fn fetch_json<T: DeserializeOwned>(client: &Client, url: &str, expected_sha1: Option<&str>) -> Result<T, MojangError> {
+fn fetch_json<T: DeserializeOwned>(
+    client: &Client,
+    url: &str,
+    expected_sha1: Option<&str>,
+) -> Result<T, MojangError> {
     if !is_allowed_host(url) {
         return Err(MojangError::DisallowedHost(url.to_string()));
     }
@@ -344,8 +399,14 @@ pub struct MergedVersion {
 /// the parent's, and its libraries are appended after the parent's.
 /// `assetIndex`/`downloads.client` always come from the parent, since
 /// modloader profiles don't redeclare them.
-pub fn merge_versions(parent: &VersionJson, child: Option<&VersionJson>) -> Result<MergedVersion, MojangError> {
-    let asset_index = parent.asset_index.clone().ok_or_else(|| MojangError::MissingField("assetIndex".into()))?;
+pub fn merge_versions(
+    parent: &VersionJson,
+    child: Option<&VersionJson>,
+) -> Result<MergedVersion, MojangError> {
+    let asset_index = parent
+        .asset_index
+        .clone()
+        .ok_or_else(|| MojangError::MissingField("assetIndex".into()))?;
     let client = parent
         .downloads
         .as_ref()
@@ -397,34 +458,69 @@ pub fn natives_directory(game_dir: &Path, version_id: &str) -> PathBuf {
 }
 
 pub fn client_jar_path(game_dir: &Path, version_id: &str) -> PathBuf {
-    game_dir.join("versions").join(version_id).join(format!("{version_id}.jar"))
+    game_dir
+        .join("versions")
+        .join(version_id)
+        .join(format!("{version_id}.jar"))
 }
 
-pub fn ensure_client_jar(client: &Client, game_dir: &Path, version_id: &str, download_ref: &DownloadRef) -> Result<PathBuf, MojangError> {
+pub fn ensure_client_jar(
+    client: &Client,
+    game_dir: &Path,
+    version_id: &str,
+    download_ref: &DownloadRef,
+) -> Result<PathBuf, MojangError> {
     if !is_allowed_host(&download_ref.url) {
         return Err(MojangError::DisallowedHost(download_ref.url.clone()));
     }
     let target = client_jar_path(game_dir, version_id);
     let checksum = Checksum::Sha1(download_ref.sha1.clone());
     if !download::is_current(&target, Some(download_ref.size), &checksum)? {
-        download::download_verified(client, &download_ref.url, &target, Some(download_ref.size), &checksum, |_, _| {})?;
+        download::download_verified(
+            client,
+            &download_ref.url,
+            &target,
+            Some(download_ref.size),
+            &checksum,
+            |_, _| {},
+        )?;
     }
     Ok(target)
 }
 
 /// Downloads every rule-allowed library with a `downloads.artifact`,
 /// returning the resulting jar paths in the same order as `libraries`.
-pub fn ensure_libraries(client: &Client, game_dir: &Path, libraries: &[Library], on_progress: &ProgressCallback) -> Result<Vec<PathBuf>, MojangError> {
+pub fn ensure_libraries(
+    client: &Client,
+    game_dir: &Path,
+    libraries: &[Library],
+    on_progress: &ProgressCallback,
+) -> Result<Vec<PathBuf>, MojangError> {
     let mut paths = Vec::new();
     let mut tasks = Vec::new();
+    let mut seen: HashMap<PathBuf, (String, u64, String)> = HashMap::new();
     for library in libraries {
         if !rule_allows(&library.rules, &HashMap::new()) {
             continue;
         }
-        let Some(artifact) = library.downloads.as_ref().and_then(|downloads| downloads.artifact.as_ref()) else {
+        let Some(artifact) = library
+            .downloads
+            .as_ref()
+            .and_then(|downloads| downloads.artifact.as_ref())
+        else {
             continue;
         };
         let target = game_dir.join("libraries").join(&artifact.path);
+        let identity = (artifact.url.clone(), artifact.size, artifact.sha1.clone());
+        if let Some(existing) = seen.get(&target) {
+            if existing != &identity {
+                return Err(MojangError::ConflictingLibrary(
+                    target.display().to_string(),
+                ));
+            }
+            continue;
+        }
+        seen.insert(target.clone(), identity);
         paths.push(target.clone());
         tasks.push(DownloadTask {
             url: artifact.url.clone(),
@@ -433,7 +529,7 @@ pub fn ensure_libraries(client: &Client, game_dir: &Path, libraries: &[Library],
             checksum: Checksum::Sha1(artifact.sha1.clone()),
         });
     }
-    download_many(client, tasks, on_progress)?;
+    download_many(client, tasks, on_progress, is_allowed_library_host)?;
     Ok(paths)
 }
 
@@ -448,20 +544,39 @@ pub struct AssetObject {
     pub size: u64,
 }
 
-pub fn ensure_asset_index(client: &Client, game_dir: &Path, asset_index: &AssetIndexRef) -> Result<AssetIndex, MojangError> {
+pub fn ensure_asset_index(
+    client: &Client,
+    game_dir: &Path,
+    asset_index: &AssetIndexRef,
+) -> Result<AssetIndex, MojangError> {
     if !is_allowed_host(&asset_index.url) {
         return Err(MojangError::DisallowedHost(asset_index.url.clone()));
     }
-    let target = game_dir.join("assets").join("indexes").join(format!("{}.json", asset_index.id));
+    let target = game_dir
+        .join("assets")
+        .join("indexes")
+        .join(format!("{}.json", asset_index.id));
     let checksum = Checksum::Sha1(asset_index.sha1.clone());
     if !download::is_current(&target, Some(asset_index.size), &checksum)? {
-        download::download_verified(client, &asset_index.url, &target, Some(asset_index.size), &checksum, |_, _| {})?;
+        download::download_verified(
+            client,
+            &asset_index.url,
+            &target,
+            Some(asset_index.size),
+            &checksum,
+            |_, _| {},
+        )?;
     }
     let bytes = fs::read(&target)?;
     serde_json::from_slice(&bytes).map_err(MojangError::InvalidJson)
 }
 
-pub fn ensure_assets(client: &Client, game_dir: &Path, index: &AssetIndex, on_progress: &ProgressCallback) -> Result<(), MojangError> {
+pub fn ensure_assets(
+    client: &Client,
+    game_dir: &Path,
+    index: &AssetIndex,
+    on_progress: &ProgressCallback,
+) -> Result<(), MojangError> {
     let objects_dir = game_dir.join("assets").join("objects");
     let tasks = index
         .objects
@@ -469,14 +584,17 @@ pub fn ensure_assets(client: &Client, game_dir: &Path, index: &AssetIndex, on_pr
         .map(|object| {
             let prefix = &object.hash[0..2];
             DownloadTask {
-                url: format!("https://resources.download.minecraft.net/{prefix}/{}", object.hash),
+                url: format!(
+                    "https://resources.download.minecraft.net/{prefix}/{}",
+                    object.hash
+                ),
                 target: objects_dir.join(prefix).join(&object.hash),
                 size: object.size,
                 checksum: Checksum::Sha1(object.hash.clone()),
             }
         })
         .collect();
-    download_many(client, tasks, on_progress)
+    download_many(client, tasks, on_progress, is_allowed_host)
 }
 
 struct DownloadTask {
@@ -496,7 +614,14 @@ const MAX_DOWNLOAD_ATTEMPTS: u32 = 5;
 fn download_with_retries(client: &Client, task: &DownloadTask) -> Result<u64, DownloadError> {
     let mut last_error = None;
     for attempt in 1..=MAX_DOWNLOAD_ATTEMPTS {
-        match download::download_verified(client, &task.url, &task.target, Some(task.size), &task.checksum, |_, _| {}) {
+        match download::download_verified(
+            client,
+            &task.url,
+            &task.target,
+            Some(task.size),
+            &task.checksum,
+            |_, _| {},
+        ) {
             Ok(bytes) => return Ok(bytes),
             Err(error) => {
                 last_error = Some(error);
@@ -512,7 +637,12 @@ fn download_with_retries(client: &Client, task: &DownloadTask) -> Result<u64, Do
 /// Downloads `tasks` using a small worker pool, calling `on_progress` with
 /// cumulative (downloaded, total) bytes as each file completes. Stops
 /// spawning new work once the first error is seen and returns it.
-fn download_many(client: &Client, tasks: Vec<DownloadTask>, on_progress: &ProgressCallback) -> Result<(), MojangError> {
+fn download_many(
+    client: &Client,
+    tasks: Vec<DownloadTask>,
+    on_progress: &ProgressCallback,
+    is_allowed: fn(&str) -> bool,
+) -> Result<(), MojangError> {
     let total: u64 = tasks.iter().map(|task| task.size).sum();
     if total == 0 {
         return Ok(());
@@ -531,12 +661,16 @@ fn download_many(client: &Client, tasks: Vec<DownloadTask>, on_progress: &Progre
                 if first_error.lock().unwrap().is_some() {
                     break;
                 }
-                let Some(task) = queue.lock().unwrap().pop() else { break };
-                if !is_allowed_host(&task.url) {
+                let Some(task) = queue.lock().unwrap().pop() else {
+                    break;
+                };
+                if !is_allowed(&task.url) {
                     *first_error.lock().unwrap() = Some(MojangError::DisallowedHost(task.url));
                     continue;
                 }
-                let already_current = download::is_current(&task.target, Some(task.size), &task.checksum).unwrap_or(false);
+                let already_current =
+                    download::is_current(&task.target, Some(task.size), &task.checksum)
+                        .unwrap_or(false);
                 if !already_current {
                     if let Err(error) = download_with_retries(client, &task) {
                         *first_error.lock().unwrap() = Some(MojangError::Download(error));
@@ -562,7 +696,10 @@ mod tests {
     fn rule(action: RuleAction, os_name: Option<&str>) -> Rule {
         Rule {
             action,
-            os: os_name.map(|name| RuleOs { name: Some(name.into()), arch: None }),
+            os: os_name.map(|name| RuleOs {
+                name: Some(name.into()),
+                arch: None,
+            }),
             features: None,
         }
     }
@@ -580,7 +717,11 @@ mod tests {
 
     #[test]
     fn non_matching_os_rule_disallows() {
-        let other = if current_os_name() == "windows" { "linux" } else { "windows" };
+        let other = if current_os_name() == "windows" {
+            "linux"
+        } else {
+            "windows"
+        };
         let rules = vec![rule(RuleAction::Allow, Some(other))];
         assert!(!rule_allows(&rules, &HashMap::new()));
     }
@@ -589,7 +730,11 @@ mod tests {
     fn unsupported_feature_is_excluded_by_default() {
         let mut features = HashMap::new();
         features.insert("is_demo_user".to_string(), true);
-        let rules = vec![Rule { action: RuleAction::Allow, os: None, features: Some(features) }];
+        let rules = vec![Rule {
+            action: RuleAction::Allow,
+            os: None,
+            features: Some(features),
+        }];
         // We never activate optional features, so a rule requiring one
         // must not match even though there's no OS constraint.
         assert!(!rule_allows(&rules, &HashMap::new()));
@@ -610,7 +755,10 @@ mod tests {
             },
         ];
         let resolved = resolve_arguments(&args, &HashMap::new());
-        assert_eq!(resolved, vec!["--username", "${auth_player_name}", "--this-os-only"]);
+        assert_eq!(
+            resolved,
+            vec!["--username", "${auth_player_name}", "--this-os-only"]
+        );
     }
 
     #[test]
@@ -640,17 +788,39 @@ mod tests {
         let merged = merge_versions(&parent, Some(&child)).unwrap();
         assert_eq!(merged.id, "neoforge-21.1.248");
         assert_eq!(merged.client_jar_version_id, "1.21.1");
-        assert_eq!(merged.main_class, "cpw.mods.bootstraplauncher.BootstrapLauncher");
-        assert_eq!(resolve_arguments(&merged.game_arguments, &HashMap::new()), vec!["--parentGame", "--childGame"]);
-        assert_eq!(resolve_arguments(&merged.jvm_arguments, &HashMap::new()), vec!["--parentJvm", "--childJvm"]);
-        assert_eq!(merged.libraries.iter().map(|library| library.name.as_str()).collect::<Vec<_>>(), vec!["parent:lib:1", "child:lib:1"]);
+        assert_eq!(
+            merged.main_class,
+            "cpw.mods.bootstraplauncher.BootstrapLauncher"
+        );
+        assert_eq!(
+            resolve_arguments(&merged.game_arguments, &HashMap::new()),
+            vec!["--parentGame", "--childGame"]
+        );
+        assert_eq!(
+            resolve_arguments(&merged.jvm_arguments, &HashMap::new()),
+            vec!["--parentJvm", "--childJvm"]
+        );
+        assert_eq!(
+            merged
+                .libraries
+                .iter()
+                .map(|library| library.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["parent:lib:1", "child:lib:1"]
+        );
         assert_eq!(merged.asset_index.id, "17");
     }
 
     #[test]
     fn disallowed_host_is_rejected() {
         assert!(!is_allowed_host("https://example.com/evil.jar"));
-        assert!(is_allowed_host("https://piston-data.mojang.com/v1/objects/x/client.jar"));
+        assert!(is_allowed_host(
+            "https://piston-data.mojang.com/v1/objects/x/client.jar"
+        ));
+        assert!(is_allowed_library_host(
+            "https://maven.neoforged.net/releases/net/neoforged/example.jar"
+        ));
+        assert!(!is_allowed_library_host("https://example.com/evil.jar"));
     }
 
     /// Live smoke test against the real Mojang CDN: manifest -> version JSON
@@ -666,7 +836,8 @@ mod tests {
         let version = fetch_version_json(&client, entry).unwrap();
         assert_eq!(version.main_class, "net.minecraft.client.main.Main");
 
-        let game_dir = std::env::temp_dir().join(format!("shacraft-mojang-live-{}", std::process::id()));
+        let game_dir =
+            std::env::temp_dir().join(format!("shacraft-mojang-live-{}", std::process::id()));
 
         let merged = merge_versions(&version, None).unwrap();
         let client_jar = ensure_client_jar(&client, &game_dir, &merged.id, &merged.client).unwrap();
@@ -678,11 +849,20 @@ mod tests {
         let mut small_libraries: Vec<Library> = merged
             .libraries
             .iter()
-            .filter(|library| library.downloads.as_ref().and_then(|downloads| downloads.artifact.as_ref()).is_some_and(|artifact| artifact.size < 200_000))
+            .filter(|library| {
+                library
+                    .downloads
+                    .as_ref()
+                    .and_then(|downloads| downloads.artifact.as_ref())
+                    .is_some_and(|artifact| artifact.size < 200_000)
+            })
             .take(5)
             .cloned()
             .collect();
-        assert!(!small_libraries.is_empty(), "expected at least one small library to sanity-check downloads with");
+        assert!(
+            !small_libraries.is_empty(),
+            "expected at least one small library to sanity-check downloads with"
+        );
         small_libraries.truncate(5);
         let progress: ProgressCallback = Arc::new(|_, _| {});
         let paths = ensure_libraries(&client, &game_dir, &small_libraries, &progress).unwrap();
@@ -692,7 +872,8 @@ mod tests {
 
         // Re-running against already-downloaded files must be a no-op (the
         // `is_current` fast path), not re-download or fail.
-        let client_jar_again = ensure_client_jar(&client, &game_dir, &merged.id, &merged.client).unwrap();
+        let client_jar_again =
+            ensure_client_jar(&client, &game_dir, &merged.id, &merged.client).unwrap();
         assert_eq!(client_jar, client_jar_again);
 
         fs::remove_dir_all(&game_dir).ok();

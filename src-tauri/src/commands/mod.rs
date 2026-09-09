@@ -4,6 +4,7 @@ pub(crate) mod game;
 pub(crate) mod host;
 pub(crate) mod preferences;
 pub(crate) mod profiles;
+pub(crate) mod shacraft;
 
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};

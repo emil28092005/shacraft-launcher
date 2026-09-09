@@ -18,6 +18,18 @@ export function singleFlight<T>(operation: () => Promise<T>): () => Promise<T> {
   }
 }
 
+/** Invalidate in-flight responses when an account or link challenge changes. */
+export function createRequestScope() {
+  let revision = 0
+  return {
+    invalidate: () => { revision += 1 },
+    capture: () => {
+      const captured = revision
+      return () => captured === revision
+    },
+  }
+}
+
 /** Serializes writes so a slow older save cannot overwrite a newer choice. */
 export function createSerialQueue() {
   let tail: Promise<unknown> = Promise.resolve()

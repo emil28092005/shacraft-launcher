@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { createSerialQueue, errorMessage } from '../services/async'
 import { isNative, native } from '../services/native'
-import { defaultSettings, isValidNickname } from '../state/settings'
-import type { AccountMode, LauncherSettings } from '../types/launcher'
+import { defaultSettings } from '../state/settings'
+import type { LauncherSettings } from '../types/launcher'
 
 export function useSettings() {
   const [settings, setSettings] = useState(defaultSettings)
-  const [nickname, setNickname] = useState(defaultSettings.nickname)
   const [loaded, setLoaded] = useState(!isNative())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [nicknameError, setNicknameError] = useState<string | null>(null)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const current = useRef(settings)
   const durable = useRef(settings)
@@ -26,7 +24,6 @@ export function useSettings() {
       current.current = value
       durable.current = value
       setSettings(value)
-      setNickname(value.nickname)
       setLoaded(true)
     }).catch((reason: unknown) => {
       if (active) setError(errorMessage(reason, 'Не удалось прочитать настройки'))
@@ -59,24 +56,11 @@ export function useSettings() {
     })
   }
 
-  const saveNickname = () => {
-    if (!isValidNickname(nickname)) {
-      setNicknameError('Ник: от 3 до 16 латинских букв, цифр или символов _')
-      return
-    }
-    setNicknameError(null)
-    save({ nickname })
-  }
-
   return {
-    settings, nickname, loaded, saving, error, nicknameError,
+    settings, loaded, saving, error,
     updateRam: (memoryGb: number) => save({ memoryMb: memoryGb * 1024 }),
-    updateMode: (accountMode: AccountMode) => save({ accountMode }),
-    updateNickname: (value: string) => { setNickname(value); setNicknameError(null) },
-    saveNickname,
     retry: () => {
       if (!loaded) setLoadAttempt((attempt) => attempt + 1)
-      else if (isValidNickname(nickname)) save({ nickname })
       else save({})
     },
   }

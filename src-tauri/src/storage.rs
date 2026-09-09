@@ -68,7 +68,7 @@ impl AtomicFile {
     pub fn commit(mut self) -> io::Result<()> {
         self.writer().sync_all()?;
         drop(self.file.take());
-        fs::rename(&self.temporary, &self.target)?;
+        replace_file(&self.temporary, &self.target)?;
         self.committed = true;
         Ok(())
     }
@@ -87,6 +87,43 @@ pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut output = AtomicFile::new(target)?;
     output.writer().write_all(bytes)?;
     output.commit()
+}
+
+/// Prefer the platform's atomic replacement. If Windows refuses an existing
+/// destination, retain the upstream recoverable replacement fallback, using
+/// this transaction's unique temporary name instead of a shared backup path.
+fn replace_file(temporary: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        fs::rename(temporary, target)
+    }
+    #[cfg(windows)]
+    {
+        match fs::rename(temporary, target) {
+            Ok(()) => return Ok(()),
+            Err(error) if !target.is_file() => return Err(error),
+            Err(_) => {}
+        }
+        let mut backup_name = temporary.as_os_str().to_os_string();
+        backup_name.push(".backup");
+        let backup = PathBuf::from(backup_name);
+        // Never overwrite a previous failed transaction's recovery file.
+        let reservation = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup)?;
+        drop(reservation);
+        fs::remove_file(&backup)?;
+        fs::rename(target, &backup)?;
+        if let Err(error) = fs::rename(temporary, target) {
+            if let Err(restore_error) = fs::rename(&backup, target) {
+                return Err(io::Error::new(error.kind(), format!("Cannot replace file: {error}; cannot restore it: {restore_error}; previous file is recoverable at {}", backup.display())));
+            }
+            return Err(error);
+        }
+        let _ = fs::remove_file(backup);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +167,24 @@ mod tests {
             target.metadata().unwrap().permissions().mode() & 0o777,
             0o600
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replaces_an_existing_file() {
+        let root = std::env::temp_dir().join(format!(
+            "shacraft-replacement-test-{}-{}",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("old.txt");
+        let temporary = root.join("new.part");
+        fs::write(&target, b"old").unwrap();
+        fs::write(&temporary, b"new").unwrap();
+        replace_file(&temporary, &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert!(!temporary.exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

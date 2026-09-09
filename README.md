@@ -7,9 +7,11 @@ React/TypeScript интерфейс, Rust — файлы, сеть и запус
 модов и конфигурации, Java discovery/provisioning, bootstrap Minecraft и
 NeoForge, настройки памяти и ника, обработка установки/запуска/выхода.
 
-Режим аккаунта выбирается явно: offline-профиль или Microsoft. Код Microsoft
-OAuth/проверки владения готов, но **вход ещё требует собственного client ID и
-одобрения Minecraft API**. Offline не подставляется при ошибке Microsoft.
+Вход выполняется через аккаунт ShaCraft — тот же, что на сайте. Игровой ник
+берётся только из подтверждённой привязки Aeronautics, а не из редактируемых
+локальных настроек. Пароли не сохраняются; сессию можно отозвать.
+Microsoft OAuth-модуль сохранён отдельно, но не используется текущим
+сценарием запуска; для его активации потребуются client ID и API approval.
 
 ## Разработка
 
@@ -34,7 +36,7 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
 Build включает строгий TypeScript. GitHub Actions проверяет UI и Rust на
-push/PR; ручной workflow собирает пакеты Windows x64, Linux x64, macOS Intel
+push/PR; workflow на main-push/ручном запуске собирает Windows x64, Linux x64, macOS Intel
 и Apple Silicon и сохраняет артефакты. Подпись релиза/автообновления ещё впереди.
 Используемые macOS runners соответствуют [списку GitHub](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 

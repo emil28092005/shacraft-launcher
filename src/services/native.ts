@@ -1,14 +1,16 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { createSubscription, singleFlight } from './async'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { createSerialQueue, createSubscription, singleFlight } from './async'
 import type {
-  DeviceCodePayload, GameExitedPayload, InstallProgressPayload,
-  JavaInstallation, LauncherSettings, LoginResultPayload, MinecraftProfile,
-  NativeHost, ProfileInspection, SyncResult,
+  GameExitedPayload, InstallProgressPayload, JavaInstallation, LauncherSettings,
+  LinkChallenge, LinkStatus, NativeHost, ProfileInspection, ServerStatus,
+  ShaCraftAccount, ShaCraftLoginResult, SyncResult,
 } from '../types/launcher'
 
 export const isNative = () => typeof window !== 'undefined' && isTauri()
-const restoreAccount = singleFlight(() => invoke<MinecraftProfile | null>('get_account'))
+const accountRequests = createSerialQueue()
+const restoreAccount = singleFlight(() => accountRequests.enqueue(() => invoke<ShaCraftAccount | null>('get_shacraft_account')))
 
 // Keep the IPC contract in one place. UI components never invoke native
 // commands directly and cannot pass arbitrary URLs or filesystem paths.
@@ -20,20 +22,20 @@ export const native = {
   inspectProfile: (profileId: string) => invoke<ProfileInspection>('inspect_remote_profile', { profileId }),
   syncProfile: (profileId: string) => invoke<SyncResult>('sync_remote_profile', { profileId }),
   getAccount: restoreAccount,
-  startLogin: () => invoke<void>('start_microsoft_login'),
-  logout: () => invoke<void>('logout'),
+  authenticate: (username: string, password: string, register: boolean) =>
+    accountRequests.enqueue(() => invoke<ShaCraftLoginResult>('shacraft_authenticate', { username, password, register })),
+  logout: () => accountRequests.enqueue(() => invoke<void>('shacraft_logout')),
+  startLink: (nickname: string) => accountRequests.enqueue(() => invoke<LinkChallenge>('shacraft_start_link', { nickname })),
+  linkStatus: (challengeId: number) => accountRequests.enqueue(() => invoke<LinkStatus>('shacraft_link_status', { challengeId })),
+  serverStatus: (profileId: string) => invoke<ServerStatus>('get_server_status', { profileId }),
   installGame: (profileId: string) => invoke<void>('ensure_game_installed', { profileId }),
   launchGame: (profileId: string) => invoke<void>('launch_game', { profileId }),
 }
 
-export function watchAccount(handlers: {
-  code: (payload: DeviceCodePayload) => void
-  result: (payload: LoginResultPayload) => void
-}) {
-  return createSubscription([
-    listen<DeviceCodePayload>('msa-login-code', ({ payload }) => handlers.code(payload)),
-    listen<LoginResultPayload>('msa-login-result', ({ payload }) => handlers.result(payload)),
-  ])
+export const windowControls = {
+  minimize: () => getCurrentWindow().minimize(),
+  toggleMaximize: () => getCurrentWindow().toggleMaximize(),
+  close: () => getCurrentWindow().close(),
 }
 
 export function watchGame(handlers: {

@@ -11,16 +11,18 @@
 
 ## Следующие задачи
 
-- [ ] Microsoft: собственный public-client ID + Minecraft API approval;
-  затем живой device-code/login/refresh/logout тест. Сейчас ID — placeholder.
+- [x] Сохранены изменения 0.1.1 из GitHub: обязательный ShaCraft-аккаунт,
+  подтверждённый ник, реальный онлайн и исправления Windows-install pipeline.
+- [ ] Microsoft (отдельное будущее решение): собственный client ID + API
+  approval и живой OAuth-тест. Текущий запуск использует ShaCraft identity.
 - [ ] Cold install / repair / update / game exit на чистых Windows/Linux/macOS.
   Unit tests и web preview не заменяют эти прогоны.
 - [ ] Подписанные installer-релизы и подписанное автообновление лаунчера.
 - [ ] Реальная отмена загрузок, журнал с редактированием токенов и retry UX.
 - [ ] Выбор каталога профиля и безопасный reset только managed-файлов.
 - [ ] Keychain-хранилище refresh token; cross-process exclusion при необходимости.
-- [ ] Динамический каталог/онлайн серверов, новости и ссылки сообщества.
-  Недоступные функции сейчас отключены, данные не имитируются.
+- [ ] Динамический каталог и новости; реальный Aeronautics онлайн уже
+  загружается через фиксированный display-only API. Не имитировать данные.
 
 ## Связанные серверные риски
 

@@ -2,6 +2,15 @@ use super::data_dir;
 use crate::{operations::LauncherOperations, profile, remote};
 use tauri::{AppHandle, State};
 
+#[tauri::command]
+pub(crate) async fn get_server_status(profile_id: String) -> Result<remote::ServerStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        remote::fetch_server_status(&profile_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Server-status task failed: {error}"))?
+}
+
 /// Loads and validates the published ShaCraft manifest before inspecting a profile.
 #[tauri::command]
 pub(crate) async fn inspect_remote_profile(

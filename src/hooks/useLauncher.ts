@@ -41,7 +41,6 @@ export function useLauncher() {
     })
     for (const server of servers) {
       const profileId = server.profileId
-      if (!profileId || server.disabled) continue
       updateProfile({ type: 'check', profileId })
       void native.inspectProfile(profileId).then((inspection) => {
         if (active) updateProfile({ type: 'checked', profileId, inspection })
@@ -78,14 +77,26 @@ export function useLauncher() {
   const launch = async (profileId: string) => {
     if (!isNative() || !eventsReady || busy.current || game.operation.phase !== 'idle') return
     busy.current = true
-    dispatch({ type: 'install', profileId })
+    dispatch({ type: 'sync', profileId })
+    updateProfile({ type: 'check', profileId })
     try {
+      // Reconcile the current signed modpack before every Play, even when a
+      // previous inspection succeeded. Game installation alone omits mods.
+      const synced = await native.syncProfile(profileId)
+      updateProfile({ type: 'checked', profileId, inspection: {
+        root: synced.root, managedFiles: synced.downloadedFiles + synced.reusedFiles,
+        missingFiles: 0, mismatchedFiles: 0, upToDate: true,
+      } })
+      dispatch({ type: 'synced', profileId })
+      dispatch({ type: 'install', profileId })
       await native.installGame(profileId)
       dispatch({ type: 'launch', profileId })
       await native.launchGame(profileId)
       dispatch({ type: 'started', profileId })
     } catch (reason) {
-      dispatch({ type: 'failed', error: errorMessage(reason, 'Не удалось запустить игру') })
+      const error = errorMessage(reason, 'Не удалось запустить игру')
+      updateProfile({ type: 'failed', profileId, error })
+      dispatch({ type: 'failed', error })
     } finally {
       busy.current = false
     }

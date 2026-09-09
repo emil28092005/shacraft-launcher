@@ -21,8 +21,11 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 
 ## Trust model
 
-- The only supported remote profile endpoint is
+- The only supported remote profile manifest endpoint is
   `https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest`.
+  The read-only Aeronautics player-count endpoint
+  `https://shacraft.ru/api/online/aoc` is also hardcoded in `remote.rs`; it
+  is display-only and is never allowed to influence downloads or launching.
 - The response is an Ed25519 envelope. `src-tauri/src/remote.rs` verifies its
   embedded public key and `keyId` **before** parsing the payload.
 - `src-tauri/src/manifest.rs` then validates paths, SHA-256, sizes, HTTPS and
@@ -36,15 +39,13 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   independent, hardcoded-host trust domains (Mojang, NeoForge, Microsoft,
   Adoptium) that install and run the actual game. Do not let manifest data
   control a URL in any of those domains.
-- Account modes: the launcher supports launching as either a genuine
-  Microsoft account that owns Minecraft Java Edition (`src-tauri/src/msa.rs`,
-  device-code OAuth -> Xbox Live -> XSTS -> Minecraft Services) or as a local
-  offline profile (nickname + deterministic offline UUID, see
-  `src-tauri/src/session.rs`). The mode is an explicit player choice
-  (`account_mode` in settings); offline is never silently substituted for a
-  Microsoft session. The mc-aoc/mc-create servers' own `ONLINE_MODE=FALSE` +
-  whitelist + Login System are a separate, independent access-control layer
-  on the server side.
+- ShaCraft accounts: `src-tauri/src/shacraft_account.rs` talks only to the
+  hardcoded `https://shacraft.ru` origin. Passwords are never persisted. The
+  revocable session token is stored locally with mode 600 on Unix. At launch,
+  the nickname is fetched from the verified `aoc` account link; the legacy
+  nickname in `settings.json` is ignored as an identity source. Server-side
+  whitelist enforcement and LoginSystem remain the final access-control
+  boundary, including for old launcher versions.
 
 ## Layout
 
@@ -59,7 +60,7 @@ payload are in `/root/shacraft` on the ShaCraft host; see
     for account/game/host/preferences/profiles. Unsigned sync/inspect IPC was
     removed; only verified remote manifests may drive profile mutations.
   - `operations.rs` — process-local install/account permits owned by workers.
-    Offline launch must not acquire the Microsoft refresh permit.
+    Launch must use the authenticated ShaCraft nickname; no settings fallback.
   - `storage.rs` — unique same-directory atomic writes, owner-only Unix files.
   - `trusted_http.rs` — HTTPS and exact-host redirect policy per game provider.
   - `download.rs` — shared verified-download helper (temp file, hash,
@@ -74,6 +75,8 @@ payload are in `/root/shacraft` on the ShaCraft host; see
     `MSA_CLIENT_ID`'s doc comment before touching login — it is currently a
     placeholder pending ShaCraft's own Azure AD app registration and
     Minecraft-API approval.
+  - `shacraft_account.rs` — local ShaCraft login/registration, session and
+    verified nickname-link API.
   - `launch.rs` — builds and spawns the actual `java` process.
 - `src-tauri/src/settings.rs` — durable local preferences; maintain backward
   compatibility with already-written JSON.
@@ -82,7 +85,7 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 - `docs/game-trust-boundary.md` — the Mojang/NeoForge/Microsoft/Adoptium
   trust domains used to install and run the game itself.
 - `.github/workflows/check.yml` — push/PR UI checks and Linux Rust tests.
-- `.github/workflows/build.yml` — manual cross-platform builds with artifacts;
+- `.github/workflows/build.yml` — main-push/manual cross-platform builds with artifacts;
   not a signed release or updater publication.
 
 ## Verification

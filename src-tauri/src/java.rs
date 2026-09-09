@@ -2,7 +2,11 @@ use crate::download::ProgressCallback;
 use crate::runtime::{self, RuntimeError};
 use reqwest::blocking::Client;
 use serde::Serialize;
-use std::{env, fmt, path::{Path, PathBuf}, process::Command};
+use std::{
+    env, fmt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,9 +25,14 @@ pub enum EnsureJavaError {
 impl fmt::Display for EnsureJavaError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Provisioning(error) => write!(formatter, "Cannot install a Java runtime: {error}"),
+            Self::Provisioning(error) => {
+                write!(formatter, "Cannot install a Java runtime: {error}")
+            }
             Self::ProvisionedButUnrecognised(path) => {
-                write!(formatter, "Installed a Java runtime at {path:?}, but it did not report a usable version")
+                write!(
+                    formatter,
+                    "Installed a Java runtime at {path:?}, but it did not report a usable version"
+                )
             }
         }
     }
@@ -38,21 +47,29 @@ pub fn detect() -> Option<JavaInstallation> {
     candidates().into_iter().find_map(check_candidate)
 }
 
-/// Returns a Java runtime with at least `required_major`, preferring
-/// whatever the user already has installed. Only downloads and extracts a
+/// Returns a Java runtime with exactly `required_major`, preferring a matching
+/// installation already on the machine. Newer JVM majors are not assumed to
+/// be compatible with the selected NeoForge/modpack version. Only downloads and extracts a
 /// ShaCraft-managed Eclipse Temurin JRE under `runtime_root` (never touches
 /// the user's own Java) when nothing suitable is already on the machine.
 /// `on_progress` reports real download bytes when a JRE actually needs
 /// fetching; it fires once with `(1, 1)` when an existing Java is reused.
-pub fn ensure_java(client: &Client, runtime_root: &Path, required_major: u8, on_progress: &ProgressCallback) -> Result<JavaInstallation, EnsureJavaError> {
+pub fn ensure_java(
+    client: &Client,
+    runtime_root: &Path,
+    required_major: u8,
+    on_progress: &ProgressCallback,
+) -> Result<JavaInstallation, EnsureJavaError> {
     if let Some(installation) = detect() {
-        if installation.major >= required_major {
+        if installation.major == required_major {
             on_progress(1, 1);
             return Ok(installation);
         }
     }
-    let executable = runtime::ensure_runtime(client, runtime_root, required_major, on_progress).map_err(EnsureJavaError::Provisioning)?;
-    check_candidate(executable.clone()).ok_or(EnsureJavaError::ProvisionedButUnrecognised(executable))
+    let executable = runtime::ensure_runtime(client, runtime_root, required_major, on_progress)
+        .map_err(EnsureJavaError::Provisioning)?;
+    check_candidate(executable.clone())
+        .ok_or(EnsureJavaError::ProvisionedButUnrecognised(executable))
 }
 
 fn candidates() -> Vec<PathBuf> {

@@ -33,7 +33,7 @@ use std::{
 /// access. Replace this before shipping login — see the module doc above.
 const MSA_CLIENT_ID: &str = "00000000-0000-0000-0000-000000000000";
 
-fn client_id_is_configured() -> bool {
+pub fn is_configured() -> bool {
     MSA_CLIENT_ID != "00000000-0000-0000-0000-000000000000"
 }
 
@@ -41,15 +41,21 @@ const DEVICE_CODE_URL: &str = "https://login.microsoftonline.com/consumers/oauth
 const TOKEN_URL: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 const XBOX_USER_AUTH_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS_AUTHORIZE_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
-const MINECRAFT_LOGIN_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
+const MINECRAFT_LOGIN_URL: &str =
+    "https://api.minecraftservices.com/authentication/login_with_xbox";
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 const ACCOUNT_FILE: &str = "account.json";
 
 pub fn http_client() -> Result<Client, reqwest::Error> {
-    crate::trusted_http::client(&[
-        "login.microsoftonline.com", "user.auth.xboxlive.com",
-        "xsts.auth.xboxlive.com", "api.minecraftservices.com",
-    ], Duration::from_secs(30))
+    crate::trusted_http::client(
+        &[
+            "login.microsoftonline.com",
+            "user.auth.xboxlive.com",
+            "xsts.auth.xboxlive.com",
+            "api.minecraftservices.com",
+        ],
+        Duration::from_secs(30),
+    )
 }
 
 #[derive(Debug)]
@@ -113,12 +119,15 @@ struct DeviceCodeResponse {
 }
 
 pub fn start_device_code(client: &Client) -> Result<DeviceCodeStart, MsaError> {
-    if !client_id_is_configured() {
+    if !is_configured() {
         return Err(MsaError::NotConfigured);
     }
     let response = client
         .post(DEVICE_CODE_URL)
-        .form(&[("client_id", MSA_CLIENT_ID), ("scope", "XboxLive.signin offline_access")])
+        .form(&[
+            ("client_id", MSA_CLIENT_ID),
+            ("scope", "XboxLive.signin offline_access"),
+        ])
         .send()
         .map_err(MsaError::Network)?;
     if !response.status().is_success() {
@@ -151,7 +160,10 @@ struct TokenResponse {
 /// decline. This is the slow step in the whole login flow — the caller
 /// should already have shown `verification_uri`/`user_code` to the user
 /// before calling this (see `start_device_code`).
-pub fn poll_device_code(client: &Client, start: &DeviceCodeStart) -> Result<MicrosoftTokens, MsaError> {
+pub fn poll_device_code(
+    client: &Client,
+    start: &DeviceCodeStart,
+) -> Result<MicrosoftTokens, MsaError> {
     let deadline = Instant::now() + Duration::from_secs(start.expires_in_seconds);
     let mut interval = Duration::from_secs(start.interval_seconds);
 
@@ -174,10 +186,16 @@ pub fn poll_device_code(client: &Client, start: &DeviceCodeStart) -> Result<Micr
         let body: TokenResponse = response.json().map_err(MsaError::Network)?;
 
         if status.is_success() {
-            let (Some(access_token), Some(refresh_token)) = (body.access_token, body.refresh_token) else {
-                return Err(MsaError::UnexpectedResponse("token response missing access_token/refresh_token".into()));
+            let (Some(access_token), Some(refresh_token)) = (body.access_token, body.refresh_token)
+            else {
+                return Err(MsaError::UnexpectedResponse(
+                    "token response missing access_token/refresh_token".into(),
+                ));
             };
-            return Ok(MicrosoftTokens { access_token, refresh_token });
+            return Ok(MicrosoftTokens {
+                access_token,
+                refresh_token,
+            });
         }
 
         match body.error.as_deref() {
@@ -188,13 +206,20 @@ pub fn poll_device_code(client: &Client, start: &DeviceCodeStart) -> Result<Micr
             }
             Some("authorization_declined") => return Err(MsaError::AuthorizationDeclined),
             Some("expired_token") => return Err(MsaError::AuthorizationExpired),
-            other => return Err(MsaError::UnexpectedResponse(other.unwrap_or("unknown device code error").into())),
+            other => {
+                return Err(MsaError::UnexpectedResponse(
+                    other.unwrap_or("unknown device code error").into(),
+                ))
+            }
         }
     }
 }
 
-pub fn refresh_microsoft_tokens(client: &Client, refresh_token: &str) -> Result<MicrosoftTokens, MsaError> {
-    if !client_id_is_configured() {
+pub fn refresh_microsoft_tokens(
+    client: &Client,
+    refresh_token: &str,
+) -> Result<MicrosoftTokens, MsaError> {
+    if !is_configured() {
         return Err(MsaError::NotConfigured);
     }
     let response = client
@@ -212,9 +237,14 @@ pub fn refresh_microsoft_tokens(client: &Client, refresh_token: &str) -> Result<
     }
     let body: TokenResponse = response.json().map_err(MsaError::Network)?;
     let (Some(access_token), Some(refresh_token)) = (body.access_token, body.refresh_token) else {
-        return Err(MsaError::UnexpectedResponse("refresh response missing access_token/refresh_token".into()));
+        return Err(MsaError::UnexpectedResponse(
+            "refresh response missing access_token/refresh_token".into(),
+        ));
     };
-    Ok(MicrosoftTokens { access_token, refresh_token })
+    Ok(MicrosoftTokens {
+        access_token,
+        refresh_token,
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -281,7 +311,10 @@ struct XboxUserHash {
     xid: Option<String>,
 }
 
-fn xbox_live_user_token(client: &Client, microsoft_access_token: &str) -> Result<(String, String), MsaError> {
+fn xbox_live_user_token(
+    client: &Client,
+    microsoft_access_token: &str,
+) -> Result<(String, String), MsaError> {
     let request = XboxUserAuthRequest {
         properties: XboxUserAuthProperties {
             auth_method: "RPS",
@@ -291,22 +324,42 @@ fn xbox_live_user_token(client: &Client, microsoft_access_token: &str) -> Result
         relying_party: "http://auth.xboxlive.com",
         token_type: "JWT",
     };
-    let response = client.post(XBOX_USER_AUTH_URL).json(&request).send().map_err(MsaError::Network)?;
+    let response = client
+        .post(XBOX_USER_AUTH_URL)
+        .json(&request)
+        .send()
+        .map_err(MsaError::Network)?;
     if !response.status().is_success() {
         return Err(MsaError::HttpStatus(response.status()));
     }
     let body: XboxTokenResponse = response.json().map_err(MsaError::Network)?;
-    let uhs = body.display_claims.xui.into_iter().next().map(|claim| claim.uhs).ok_or_else(|| MsaError::UnexpectedResponse("missing uhs".into()))?;
+    let uhs = body
+        .display_claims
+        .xui
+        .into_iter()
+        .next()
+        .map(|claim| claim.uhs)
+        .ok_or_else(|| MsaError::UnexpectedResponse("missing uhs".into()))?;
     Ok((body.token, uhs))
 }
 
-fn xsts_authorize(client: &Client, xbox_live_token: &str) -> Result<(String, String, Option<String>), MsaError> {
+fn xsts_authorize(
+    client: &Client,
+    xbox_live_token: &str,
+) -> Result<(String, String, Option<String>), MsaError> {
     let request = XstsRequest {
-        properties: XstsProperties { sandbox_id: "RETAIL", user_tokens: [xbox_live_token] },
+        properties: XstsProperties {
+            sandbox_id: "RETAIL",
+            user_tokens: [xbox_live_token],
+        },
         relying_party: "rp://api.minecraftservices.com/",
         token_type: "JWT",
     };
-    let response = client.post(XSTS_AUTHORIZE_URL).json(&request).send().map_err(MsaError::Network)?;
+    let response = client
+        .post(XSTS_AUTHORIZE_URL)
+        .json(&request)
+        .send()
+        .map_err(MsaError::Network)?;
     let status = response.status();
     if status.as_u16() == 401 {
         // XErr 2148916233 means the account has no Xbox profile at all
@@ -319,7 +372,12 @@ fn xsts_authorize(client: &Client, xbox_live_token: &str) -> Result<(String, Str
         return Err(MsaError::HttpStatus(status));
     }
     let body: XboxTokenResponse = response.json().map_err(MsaError::Network)?;
-    let claim = body.display_claims.xui.into_iter().next().ok_or_else(|| MsaError::UnexpectedResponse("missing uhs".into()))?;
+    let claim = body
+        .display_claims
+        .xui
+        .into_iter()
+        .next()
+        .ok_or_else(|| MsaError::UnexpectedResponse("missing uhs".into()))?;
     Ok((body.token, claim.uhs, claim.xid))
 }
 
@@ -335,8 +393,14 @@ struct MinecraftLoginResponse {
 }
 
 fn minecraft_login(client: &Client, user_hash: &str, xsts_token: &str) -> Result<String, MsaError> {
-    let request = MinecraftLoginRequest { identity_token: format!("XBL3.0 x={user_hash};{xsts_token}") };
-    let response = client.post(MINECRAFT_LOGIN_URL).json(&request).send().map_err(MsaError::Network)?;
+    let request = MinecraftLoginRequest {
+        identity_token: format!("XBL3.0 x={user_hash};{xsts_token}"),
+    };
+    let response = client
+        .post(MINECRAFT_LOGIN_URL)
+        .json(&request)
+        .send()
+        .map_err(MsaError::Network)?;
     if !response.status().is_success() {
         return Err(MsaError::HttpStatus(response.status()));
     }
@@ -354,7 +418,10 @@ pub struct MinecraftProfile {
 /// Confirms game ownership. A 404 here means the account has no Java
 /// Edition profile — i.e. doesn't own the game — and nothing should
 /// install or launch.
-fn fetch_minecraft_profile(client: &Client, minecraft_access_token: &str) -> Result<MinecraftProfile, MsaError> {
+fn fetch_minecraft_profile(
+    client: &Client,
+    minecraft_access_token: &str,
+) -> Result<MinecraftProfile, MsaError> {
     let response = client
         .get(MINECRAFT_PROFILE_URL)
         .bearer_auth(minecraft_access_token)
@@ -383,15 +450,26 @@ fn complete_login(client: &Client, tokens: MicrosoftTokens) -> Result<LoginResul
     let (xsts_token, user_hash, xuid) = xsts_authorize(client, &xbox_live_token)?;
     let minecraft_access_token = minecraft_login(client, &user_hash, &xsts_token)?;
     let profile = fetch_minecraft_profile(client, &minecraft_access_token)?;
-    Ok(LoginResult { minecraft_access_token, profile, refresh_token: tokens.refresh_token, xuid })
+    Ok(LoginResult {
+        minecraft_access_token,
+        profile,
+        refresh_token: tokens.refresh_token,
+        xuid,
+    })
 }
 
-pub fn login_with_device_code(client: &Client, start: &DeviceCodeStart) -> Result<LoginResult, MsaError> {
+pub fn login_with_device_code(
+    client: &Client,
+    start: &DeviceCodeStart,
+) -> Result<LoginResult, MsaError> {
     let tokens = poll_device_code(client, start)?;
     complete_login(client, tokens)
 }
 
-pub fn login_with_refresh_token(client: &Client, refresh_token: &str) -> Result<LoginResult, MsaError> {
+pub fn login_with_refresh_token(
+    client: &Client,
+    refresh_token: &str,
+) -> Result<LoginResult, MsaError> {
     let tokens = refresh_microsoft_tokens(client, refresh_token)?;
     complete_login(client, tokens)
 }
@@ -408,8 +486,15 @@ struct StoredAccount {
 
 pub fn save_refresh_token(data_dir: &Path, refresh_token: &str) -> io::Result<()> {
     fs::create_dir_all(data_dir)?;
-    let saved_at_unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    let contents = serde_json::to_vec_pretty(&StoredAccount { refresh_token: refresh_token.to_string(), saved_at_unix }).expect("StoredAccount is serializable");
+    let saved_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let contents = serde_json::to_vec_pretty(&StoredAccount {
+        refresh_token: refresh_token.to_string(),
+        saved_at_unix,
+    })
+    .expect("StoredAccount is serializable");
 
     let target = data_dir.join(ACCOUNT_FILE);
     crate::storage::write_atomic(&target, &contents)
@@ -438,7 +523,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shacraft-msa-test-{}", std::process::id()));
         assert!(load_refresh_token(&dir).is_none());
         save_refresh_token(&dir, "super-secret-refresh-token").unwrap();
-        assert_eq!(load_refresh_token(&dir).as_deref(), Some("super-secret-refresh-token"));
+        assert_eq!(
+            load_refresh_token(&dir).as_deref(),
+            Some("super-secret-refresh-token")
+        );
         clear_account(&dir).unwrap();
         assert!(load_refresh_token(&dir).is_none());
         fs::remove_dir_all(&dir).ok();
@@ -448,18 +536,26 @@ mod tests {
     #[test]
     fn stored_account_file_is_not_world_or_group_readable() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("shacraft-msa-perm-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("shacraft-msa-perm-test-{}", std::process::id()));
         save_refresh_token(&dir, "secret").unwrap();
-        let mode = fs::metadata(dir.join(ACCOUNT_FILE)).unwrap().permissions().mode() & 0o777;
+        let mode = fs::metadata(dir.join(ACCOUNT_FILE))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
         fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn refuses_to_run_with_placeholder_client_id() {
-        assert!(!client_id_is_configured());
+        assert!(!is_configured());
         let client = Client::builder().build().unwrap();
-        assert!(matches!(start_device_code(&client), Err(MsaError::NotConfigured)));
+        assert!(matches!(
+            start_device_code(&client),
+            Err(MsaError::NotConfigured)
+        ));
     }
 
     /// Live smoke test: requests a real device code from Microsoft and

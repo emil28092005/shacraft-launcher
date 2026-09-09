@@ -6,10 +6,8 @@ export interface Server {
   name: string
   subtitle: string
   version: string
-  composition: string
   loader: string
-  profileId?: string
-  disabled?: boolean
+  profileId: string
 }
 
 export interface NativeHost {
@@ -45,21 +43,31 @@ export interface SyncResult {
   downloadedBytes: number
 }
 
-export interface MinecraftProfile {
-  id: string
-  name: string
+export interface ShaCraftAccount {
+  username: string
+  links: { server_id: string; mc_username: string }[]
 }
 
-export interface DeviceCodePayload {
-  verificationUri: string
-  userCode: string
-  expiresInSeconds: number
+export interface ShaCraftLoginResult {
+  account: ShaCraftAccount
+  recoveryCodes: string[]
 }
 
-export interface LoginResultPayload {
-  ok: boolean
-  profile: MinecraftProfile | null
-  error: string | null
+export interface LinkChallenge {
+  challenge_id: number
+  expires_in_seconds: number
+  registered_on_server: boolean
+}
+
+export interface LinkStatus {
+  status: string
+  detail?: string | null
+}
+
+export interface ServerStatus {
+  online: number | null
+  max: number | null
+  reachable: boolean
 }
 
 export interface InstallProgressPayload {

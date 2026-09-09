@@ -4,10 +4,14 @@
 
 The launcher persists local settings, synchronises Aeronautics mod/config
 files from the signed ShaCraft v2 manifest, installs the exact Minecraft +
-NeoForge version the manifest specifies, and launches the game. Players can
-launch either with a real Microsoft account or with a local offline profile
-(nickname + deterministic offline UUID) — see `docs/game-trust-boundary.md`
-and `AGENTS.md`'s trust model section.
+NeoForge version the manifest specifies, and launches the game. A player
+signs in with the same local ShaCraft account used on the website. The game
+identity is derived only from that account's verified Aeronautics nickname;
+the legacy editable nickname setting is not trusted at launch.
+
+The interface also shows a live Aeronautics player count from the fixed,
+read-only `https://shacraft.ru/api/online/aoc` endpoint. It is display-only:
+the result never controls files, versions, URLs, or the launch command.
 
 Not yet implemented: a user-selectable profile directory, a "reset managed
 files only" recovery action, and signed cross-platform release builds of the
@@ -28,7 +32,9 @@ Game itself (never controlled by the manifest above)
   -> Java 21 via Adoptium if none installed (runtime.rs)
   -> NeoForge's own installer, run headlessly (neoforge.rs)
   -> generic inheritsFrom merge of the two version JSONs (mojang.rs)
-  -> explicit Microsoft session (msa.rs) OR offline identity (session.rs)
+  -> SHA-1-verified merged libraries + platform natives (mojang.rs)
+  -> verified ShaCraft account link (shacraft_account.rs)
+  -> deterministic offline UUID for the linked nickname (session.rs)
   -> java process spawned with the merged classpath/args (launch.rs)
 ```
 
@@ -37,8 +43,9 @@ screenshots/resourcepacks) live below Tauri's `app_data_dir()/profiles/
 <profile-id>` — this becomes `--gameDir`. The shared vanilla+NeoForge
 install (versions/libraries/assets/runtime, reused across profiles that
 target the same Minecraft version) lives at `app_data_dir()/game`. Settings
-live at `app_data_dir()/settings.json`, the Microsoft refresh token at
-`app_data_dir()/account.json` (mode 600). None of these should be assumed to
+live at `app_data_dir()/settings.json`, and the revocable ShaCraft session at
+`app_data_dir()/shacraft-session` (mode 600 on Unix). Passwords are never
+written to disk. None of these should be assumed to
 be the system `.minecraft` directory.
 
 ## Aeronautics contract
@@ -52,6 +59,22 @@ be the system `.minecraft` directory.
   no launcher release.
 - ShaCraft download files: HTTPS only, exact hosts `shacraft.ru` and
   `cdn.shacraft.ru`.
+- Account API origin: fixed `https://shacraft.ru`; redirects are rejected.
+- Launch identity: the most recently verified `aoc` nickname returned by the
+  authenticated account API. Local nickname edits cannot select an identity.
+
+## Planned but not implemented
+
+1. User-selectable profile directory and structured launcher logs.
+2. "Reset managed files only" recovery action that doesn't touch player
+   worlds/screenshots/resourcepacks.
+3. Signed, cross-platform release builds of the launcher itself.
+4. Cancellation, structured logs and a full cold-install/recovery beta on
+   every target OS. Install progress reports bytes or installer work counts
+   depending on the stage; these units are not interchangeable.
+
+Do not represent these as completed features in UI or release notes.
+
 
 ## Module boundaries (2026-09-09)
 
@@ -62,32 +85,23 @@ even under React StrictMode. A failed repair invalidates profile readiness.
 Game exit may arrive before launch acknowledgement; the reducer handles both.
 Browser preview cannot install/launch and does not simulate download progress.
 
-Rust `lib.rs` registers commands from `commands/`. Install/account permits in
-`operations.rs` stay owned by blocking workers until completion. These are
-process-local guards, not cross-process locks or cancellation support.
+Rust `lib.rs` registers commands from `commands/`. Installation and account
+permits in `operations.rs` stay owned by blocking workers until completion.
+ShaCraft sessions have a separate gate from the retained Microsoft module.
+These are process-local guards, not cross-process locks or cancellation.
 `storage.rs` provides unique temporary files and atomic replacement; Unix
-account files are created owner-only rather than chmodded after writing.
-`trusted_http.rs` constrains initial provider URLs and every redirect.
-Manifest profile identity, size, signature, portable paths and existing
-symlinks are checked before managed file writes. Local same-user TOCTOU is
-outside this protection; do not describe it as an OS sandbox.
+session files are created owner-only. Windows keeps a recoverable replacement
+fallback if the OS refuses direct replacement. `trusted_http.rs` constrains provider
+URLs and redirects. Manifest profile identity, size, signature, portable
+paths and existing symlinks are checked before managed file writes.
+Hostile same-user TOCTOU is outside this protection; it is not an OS sandbox.
 
 ## Verification and distribution
 
 `npm test` covers asynchronous helpers and state transitions;
 `npm run build` runs strict TypeScript before Vite. `cargo test --locked`
-covers native policy and storage. Push/PR CI repeats these checks on Linux.
-Manual `build.yml` builds Windows x64, Linux x64 and both macOS architectures
-and uploads bundles. Packages are not yet signed release artifacts.
-
-## Planned but not implemented
-
-1. User-selectable profile directory and structured launcher logs.
-2. "Reset managed files only" recovery action that doesn't touch player
-   worlds/screenshots/resourcepacks.
-3. Signed, cross-platform release builds of the launcher itself.
-4. Cancellation, structured logs and full cold-install/recovery beta on
-   every target OS. Current install progress reports actual stage work;
-   bytes and installer completion counts are not interchangeable units.
-
-Do not represent these as completed features in UI or release notes.
+covers native policy and storage. Push/PR CI repeats checks on Linux.
+The package workflow runs on main pushes or manually and builds Windows
+x64, Linux x64 and both macOS architectures with named artifacts.
+Packages are not yet signed release artifacts. Native cold-install and
+launch tests are required before calling a platform release-ready.

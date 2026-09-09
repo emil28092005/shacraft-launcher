@@ -1,20 +1,32 @@
 use crate::manifest::{self, Manifest};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use ed25519_dalek::{Signature, VerifyingKey};
+use reqwest::header::ACCEPT_ENCODING;
 use reqwest::{blocking::Client, redirect::Policy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     io::{self, Read},
+    thread,
     time::Duration,
 };
 
 const AERONAUTICS_MANIFEST: &str =
     "https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest";
+const AERONAUTICS_ONLINE: &str = "https://shacraft.ru/api/online/aoc";
 const MANIFEST_PUBLIC_KEY: &str = "2S3FRdZj4Xw5nJpZ3IhqVITBg3nTH9AtGSo1Ew9+qVQ=";
 const MANIFEST_KEY_ID: &str = "2026-09-06";
-// Allow the base64 envelope around a payload of up to 2 MiB.
-const MAX_ENVELOPE_BYTES: usize = 3 * 1024 * 1024;
+const MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
+const MANIFEST_ATTEMPTS: u32 = 3;
+
+/// Display-only status: never used to select executable files or versions.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatus {
+    pub online: Option<u32>,
+    pub max: Option<u32>,
+    pub reachable: bool,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,21 +74,13 @@ pub fn fetch_manifest(profile_id: &str) -> Result<Manifest, RemoteError> {
         _ => return Err(RemoteError::UnknownProfile),
     };
     let client = Client::builder()
+        .https_only(true)
+        .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .redirect(Policy::none())
         .build()
         .map_err(RemoteError::Network)?;
-    let response = client.get(url).send().map_err(RemoteError::Network)?;
-    if !response.status().is_success() {
-        return Err(RemoteError::Status(response.status()));
-    }
-    if response
-        .content_length()
-        .is_some_and(|size| size > MAX_ENVELOPE_BYTES as u64)
-    {
-        return Err(RemoteError::TooLarge);
-    }
-    let source = read_envelope(response)?;
+    let source = fetch_manifest_bytes(&client, url)?;
     let public_key_bytes = STANDARD
         .decode(MANIFEST_PUBLIC_KEY)
         .expect("embedded public key must be valid");
@@ -87,6 +91,55 @@ pub fn fetch_manifest(profile_id: &str) -> Result<Manifest, RemoteError> {
     )
     .expect("embedded public key must be valid");
     verify_envelope(&source, profile_id, &public_key)
+}
+
+fn fetch_manifest_bytes(client: &Client, url: &str) -> Result<Vec<u8>, RemoteError> {
+    for attempt in 1..=MANIFEST_ATTEMPTS {
+        let request = || {
+            let response = client
+                .get(url)
+                .header(ACCEPT_ENCODING, "identity")
+                .send()
+                .map_err(RemoteError::Network)?;
+            if !response.status().is_success() {
+                return Err(RemoteError::Status(response.status()));
+            }
+            if response
+                .content_length()
+                .is_some_and(|size| size > MAX_ENVELOPE_BYTES as u64)
+            {
+                return Err(RemoteError::TooLarge);
+            }
+            read_envelope(response)
+        };
+        match request() {
+            Err(RemoteError::Network(_) | RemoteError::Read(_)) if attempt < MANIFEST_ATTEMPTS => {
+                thread::sleep(Duration::from_millis(250 * attempt as u64));
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the last attempt always returns")
+}
+
+pub fn fetch_server_status(profile_id: &str) -> Result<ServerStatus, RemoteError> {
+    let url = match profile_id {
+        "aeronautics" => AERONAUTICS_ONLINE,
+        _ => return Err(RemoteError::UnknownProfile),
+    };
+    let client = Client::builder()
+        .https_only(true)
+        .timeout(Duration::from_secs(10))
+        .redirect(Policy::none())
+        .build()
+        .map_err(RemoteError::Network)?;
+    let response = client.get(url).send().map_err(RemoteError::Network)?;
+    if !response.status().is_success() {
+        return Err(RemoteError::Status(response.status()));
+    }
+    response
+        .json::<ServerStatus>()
+        .map_err(RemoteError::Network)
 }
 
 fn read_envelope(source: impl Read) -> Result<Vec<u8>, RemoteError> {
@@ -212,5 +265,38 @@ mod tests {
             read_envelope(io::repeat(b'x')),
             Err(RemoteError::TooLarge)
         ));
+    }
+
+    #[test]
+    fn retries_truncated_manifest_transfers_and_requests_identity_encoding() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/manifest", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for body in [
+                b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nbad".as_slice(),
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".as_slice(),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = [0_u8; 4096];
+                let length = stream.read(&mut request).unwrap();
+                assert!(String::from_utf8_lossy(&request[..length])
+                    .to_ascii_lowercase()
+                    .contains("accept-encoding: identity"));
+                stream.write_all(body).unwrap();
+            }
+        });
+        let client = Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        assert_eq!(fetch_manifest_bytes(&client, &url).unwrap(), b"{}");
+        server.join().unwrap();
     }
 }

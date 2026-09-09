@@ -1,4 +1,4 @@
-use super::{account::resolve_identity, data_dir};
+use super::{data_dir, shacraft::resolve_identity};
 use crate::{
     java, launch, manifest, mojang, neoforge, operations::LauncherOperations, remote, runtime,
     settings,
@@ -114,24 +114,23 @@ pub(crate) async fn ensure_game_installed(
             &cache_dir,
             &stage_progress("neoforge"),
         )?;
-        if manifest.minecraft.loader.kind != "neoforge" {
-            // Vanilla-only profiles skip the installer, which normally
-            // downloads vanilla itself; do it ourselves here instead.
-            mojang::ensure_client_jar(
-                &client,
-                &game_dir,
-                &merged.client_jar_version_id,
-                &merged.client,
-            )
-            .map_err(|error| error.to_string())?;
-            mojang::ensure_libraries(
-                &client,
-                &game_dir,
-                &merged.libraries,
-                &stage_progress("libraries"),
-            )
-            .map_err(|error| error.to_string())?;
-        };
+        // NeoForge may leave vanilla runtime libraries (including LWJGL) absent.
+        // Verify the full merged set, using the loader Maven only for libraries.
+        let library_client = mojang::library_http_client().map_err(|error| error.to_string())?;
+        mojang::ensure_client_jar(
+            &client,
+            &game_dir,
+            &merged.client_jar_version_id,
+            &merged.client,
+        )
+        .map_err(|error| error.to_string())?;
+        mojang::ensure_libraries(
+            &library_client,
+            &game_dir,
+            &merged.libraries,
+            &stage_progress("libraries"),
+        )
+        .map_err(|error| error.to_string())?;
 
         let asset_index = mojang::ensure_asset_index(&client, &game_dir, &merged.asset_index)
             .map_err(|error| error.to_string())?;
@@ -151,10 +150,9 @@ pub(crate) struct GameExited {
     exit_code: Option<i32>,
 }
 
-/// Launches `profile_id` as the account chosen in settings (`account_mode`).
-/// In `Microsoft` mode a real session is required (see `resolve_identity`);
-/// in `Offline` mode the local nickname from settings is used, so no
-/// Microsoft account is needed. Spawns the game detached; watches it on a
+/// Launches `profile_id` with the verified ShaCraft account's linked nickname.
+/// Local legacy nickname/account-mode preferences cannot override the link.
+/// Spawns the game detached; watches it on a
 /// background thread only to emit `game-exited` when it eventually closes.
 #[tauri::command]
 pub(crate) async fn launch_game(
@@ -165,7 +163,7 @@ pub(crate) async fn launch_game(
     let game_dir = data_dir(&app)?.join("game");
     let data_dir = data_dir(&app)?;
     let permit = state.installation.acquire("Installation")?;
-    let account_operation = state.account.clone();
+    let account_operation = state.shacraft_account.clone();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let _permit = permit;
@@ -174,7 +172,7 @@ pub(crate) async fn launch_game(
         let manifest = remote::fetch_manifest(&profile_id).map_err(|error| error.to_string())?;
         let profile_dir = data_dir.join("profiles").join(&manifest.id);
         let settings = settings::load(&data_dir).map_err(|error| error.to_string())?;
-        let identity = resolve_identity(&data_dir, &settings, &account_operation)?;
+        let identity = resolve_identity(&data_dir, &account_operation)?;
 
         // Everything here should already be installed by `ensure_game_installed`,
         // so these are expected to hit their fast paths; no progress to show.

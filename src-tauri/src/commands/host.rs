@@ -1,5 +1,5 @@
 use super::data_dir;
-use crate::{java, manifest};
+use crate::{java, manifest, msa};
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -27,6 +27,11 @@ pub(crate) fn native_host(app: AppHandle) -> Result<NativeHost, String> {
 #[tauri::command]
 pub(crate) fn detect_java() -> Option<java::JavaInstallation> {
     java::detect()
+}
+
+#[tauri::command]
+pub(crate) fn microsoft_login_available() -> bool {
+    msa::is_configured()
 }
 
 /// Validates an untrusted profile manifest before any file is downloaded.
