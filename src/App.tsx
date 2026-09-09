@@ -9,6 +9,7 @@ import { Titlebar } from './components/Titlebar'
 import { servers } from './data/servers'
 import { useAccount } from './hooks/useAccount'
 import { useLauncher } from './hooks/useLauncher'
+import { useLauncherUpdate } from './hooks/useLauncherUpdate'
 import { useServerStatus } from './hooks/useServerStatus'
 import { useSettings } from './hooks/useSettings'
 import { isNative } from './services/native'
@@ -33,9 +34,11 @@ export function App() {
   const access = launchAccess(session.account)
   const checking = desktop && (!profile || profile.status === 'checking')
   const settingsBlocked = !preferences.loaded || preferences.saving || !!preferences.error
-  const disabled = !desktop || busy || session.busy || access === 'loading' ||
+  const updater = useLauncherUpdate(busy || session.busy || preferences.saving || session.recoveryCodes.length > 0)
+  const updateLocked = updater.locksOperations
+  const disabled = !desktop || busy || updateLocked || session.busy || access === 'loading' ||
     (access === 'ready' && (checking || settingsBlocked || !launcher.eventsReady))
-  const repairDisabled = !desktop || busy || checking
+  const repairDisabled = !desktop || busy || updateLocked || checking
   const error = launcher.game.error ?? preferences.error ?? windowError ?? launcher.environmentError ?? session.error ?? profile?.error ?? null
   useEffect(() => {
     if (error) setErrorFeedback({ kind: 'error', title: 'Ошибка лаунчера', message: error })
@@ -43,6 +46,7 @@ export function App() {
 
   let label = 'Играть'
   if (!desktop) label = 'В приложении'
+  else if (updateLocked) label = updater.state.phase === 'ready' || updater.state.phase === 'restarting' ? 'Перезапустите лаунчер' : 'Обновляем лаунчер…'
   else if (operation.phase === 'running') label = 'Игра запущена'
   else if (operation.phase === 'launching') label = 'Запускаем…'
   else if (operation.phase === 'installing') label = operation.progress ? `${installStageLabels[operation.progress.stage]}…` : 'Подготовка…'
@@ -66,7 +70,7 @@ export function App() {
       <Titlebar host={launcher.host} onError={setWindowError} />
       <div className="workspace" inert={session.recoveryCodes.length > 0}>
         <Library selected={selected} profiles={launcher.profiles} account={session.account}
-          native={desktop} locked={busy || session.busy} onSelect={setSelected} onSettings={() => setSettingsOpen(true)} />
+          native={desktop} locked={busy || updateLocked || session.busy} onSelect={setSelected} onSettings={() => setSettingsOpen(true)} />
         <ServerStage server={selected} status={serverStatus}>
           <PlayDock server={selected} operation={operation} profile={profile}
             memoryGb={preferences.settings.memoryMb / 1024} native={desktop}
@@ -75,8 +79,14 @@ export function App() {
             onPrimary={primary} onRepair={() => { if (!repairDisabled) void launcher.repair(selected.profileId) }} />
         </ServerStage>
       </div>
-      <SettingsDrawer open={settingsOpen && !session.recoveryCodes.length} locked={busy} preferences={preferences}
-        session={session} host={launcher.host} java={launcher.java} onClose={closeSettings} />
+      {desktop && (updater.state.status?.version || updateLocked) && !settingsOpen && !session.recoveryCodes.length &&
+        <button className="update-banner" onClick={() => setSettingsOpen(true)}>
+          <span className="update-banner-dot" />
+          {updater.state.phase === 'ready' || updater.state.phase === 'restarting' ? 'Обновление установлено · перезапустить'
+            : updateLocked ? 'Обновляем ShaCraft Launcher…' : `ShaCraft Launcher ${updater.state.status?.version} · обновить`}
+        </button>}
+      <SettingsDrawer open={settingsOpen && !session.recoveryCodes.length} locked={busy || updateLocked} preferences={preferences}
+        session={session} updater={updater} host={launcher.host} java={launcher.java} onClose={closeSettings} />
       <RecoveryCodesModal codes={session.recoveryCodes} onAcknowledge={session.acknowledgeRecoveryCodes} />
       <FeedbackDialog feedback={session.recoveryCodes.length ? null : session.feedback ?? errorFeedback}
         onDismiss={() => { session.dismissFeedback(); setErrorFeedback(null) }} />

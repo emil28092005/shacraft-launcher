@@ -22,9 +22,12 @@ The interface also shows a live Aeronautics player count from the fixed,
 read-only `https://shacraft.ru/api/online/aoc` endpoint. It is display-only:
 the result never controls files, versions, URLs, or the launch command.
 
-Not yet implemented: a user-selectable profile directory, a "reset managed
-files only" recovery action, and signed cross-platform release builds of the
-launcher itself. Do not represent these as completed in UI or release notes.
+Version 0.1.3 adds signed application updates, separate from modpack sync.
+Linux AppImage replacement is supported; the first upgrade from 0.1.2 is manual.
+Windows/macOS packages still require publication and actual installation tests.
+Not yet implemented: a user-selectable profile directory and a "reset managed
+files only" recovery action. OS code signing/notarization is separate from the
+updater signatures and is not certified by this implementation.
 
 ## Data flow
 
@@ -143,7 +146,8 @@ proof with a shared key embedded in distributed binaries.
 1. User-selectable profile directory and structured launcher logs.
 2. "Reset managed files only" recovery action that doesn't touch player
    worlds/screenshots/resourcepacks.
-3. Signed, cross-platform release builds of the launcher itself.
+3. Windows Authenticode/macOS signing-notarization and cross-platform release
+   installation testing.
 4. Cancellation, structured logs and a full cold-install/recovery beta on
    every target OS. Install progress reports bytes or installer work counts
    depending on the stage; these units are not interchangeable.
@@ -173,6 +177,36 @@ URLs and redirects. Manifest profile identity, size, signature, portable
 paths and existing symlinks are checked before managed file writes.
 Hostile same-user TOCTOU is outside this protection; it is not an OS sandbox.
 
+## Signed application updates (0.1.3)
+
+`updater.rs` accepts only the fixed HTTPS feed
+`https://shacraft.ru/launcher/updates/stable.json`. A dedicated embedded Tauri
+public key authenticates both the metadata payload and the selected package.
+The signed metadata binds the plain stable version, release notes, date and
+platform URLs. Artifact URLs are confined to the matching version directory
+under `https://shacraft.ru/downloads/shacraft-launcher/`. The IPC never accepts
+a URL, key, destination path or replacement executable from the webview.
+
+Metadata is downloaded once, with a 192 KiB envelope/64 KiB payload bound;
+packages are capped at 256 MiB. Redirects and version downgrades are rejected.
+The small vendored Tauri 2.11.0 `check_metadata` patch constructs its update
+object without another HTTP request. Linux AppImage installation uses a
+same-directory temporary file, signature verification, preserved permissions,
+atomic rename and file/directory fsync. Windows/macOS retain Tauri's platform
+installers. Unsupported Linux formats show manual installation instructions.
+
+The native updater holds installation, account and game permits while installing
+and until restart. The game permit remains held until the launched Java child
+exits. These guards cover this launcher process, not other launcher instances.
+Startup checks never silently install; settings expose check, install, progress,
+errors and restart. A failed check does not prevent using the installed version.
+
+The private updater key stays on the operator's computer. Normal CI builds are
+explicitly unsigned; reviewed release artifacts and metadata are signed locally
+and published only after signature/hash verification. The Caddy feed route uses
+`Cache-Control: no-store`. See [launcher-updates.md](launcher-updates.md) for
+the envelope contract, publisher commands and recovery constraints.
+
 ## Verification and distribution
 
 `npm test` covers asynchronous helpers and state transitions;
@@ -180,8 +214,9 @@ Hostile same-user TOCTOU is outside this protection; it is not an OS sandbox.
 covers native policy and storage. Push/PR CI repeats checks on Linux.
 The package workflow runs on main pushes or manually and builds Windows
 x64, Linux x64 and both macOS architectures with named artifacts.
-Packages are not yet signed release artifacts. Native cold-install and
-launch tests are required before calling a platform release-ready.
+CI packages are unsigned build artifacts. Signed updater publication is a
+separate local operator step. Native cold-install and launch tests are required
+before calling a platform release-ready.
 
 The local admission checkpoint passed 64 Rust tests (5 live tests ignored),
 22 UI unit tests, TypeScript/Vite build and a Linux x86-64 release build with
@@ -201,3 +236,15 @@ for older Ubuntu releases from this build. For local AppImage packaging,
 linuxdeploy's GTK plugin needs `librsvg-2.0.pc` from the matching `librsvg2-dev`
 package. Extracting that package into a temporary build directory and setting
 `PKG_CONFIG_PATH` supplied the missing metadata without changing host packages.
+
+The 0.1.3 updater checkpoint passed 76 native tests (6 live tests ignored),
+28 UI tests, 11 publisher tests with real minisign and TypeScript/Vite build.
+Nine browser scenarios used mocked IPC. The signed Linux AppImage/deb were
+published on 2026-09-10 with a signed stable feed; feed bytes, signatures and
+public HTTPS responses were verified. A separately invoked live native test
+downloaded the production release, rejected corrupted bytes without changing
+the old file, atomically updated a temporary copy of 0.1.2 and compared hashes.
+The original source AppImage was retained. The installed 0.1.3 AppImage was
+then started from `~/Applications` and its captured runtime paths verified.
+This is not a full GUI update/restart cycle or a Windows/macOS installation test.
+The Linux build host remains Ubuntu 26.04.

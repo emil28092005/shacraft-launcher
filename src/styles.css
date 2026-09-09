@@ -130,7 +130,7 @@ button:disabled { cursor: default; }
 .settings-drawer.open { transform: translateX(0); }
 .drawer-title { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 34px; }
 .drawer-title p { color: #737c74; font-size: 11px; margin: 0 0 5px; }
-.drawer-title h2 { margin: 0; font-family: 'Unbounded'; font-size: 25px; }
+.drawer-title h2 { margin: 0; font-family: 'Unbounded', sans-serif; font-size: 21px; }
 .drawer-title button { border: 0; background: #222923; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; cursor: pointer; }
 .drawer-title button svg { width: 18px; }
 .range-setting { display: grid; background: #191f1a; padding: 18px; border-radius: 13px; margin-bottom: 12px; }
@@ -157,6 +157,30 @@ button:disabled { cursor: default; }
 .account-hint { font-size: 11px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
 .recovery-codes { white-space: pre-line; font-size: 15px; max-height: 45vh; overflow: auto; }
 .settings-feedback button { padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--line); cursor: pointer; }
+
+.update-banner { position: absolute; top: 70px; right: 28px; z-index: 10; display: flex; align-items: center; gap: 9px; max-width: 440px; padding: 10px 14px; border: 1px solid #325939; border-radius: 9px; background: #17291bdc; color: #b6e5b8; font-size: 11px; cursor: pointer; box-shadow: 0 6px 24px #0003; }
+.update-banner:hover { background: #203a25; }
+.update-banner-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--green); }
+.launcher-update { border: 1px solid #2c3e30; border-radius: 12px; padding: 17px; margin-bottom: 24px; background: #17201a; }
+.launcher-update-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.launcher-update-heading h3 { margin: 0; font-size: 13px; font-weight: 750; }
+.launcher-update-heading > span { color: #a6bba8; font-size: 11px; }
+.launcher-update p { font-size: 11px; line-height: 1.65; margin: 10px 0 0; color: #97a89a; }
+.launcher-update p.update-success { color: #b0e2b1; }
+.launcher-update .update-error { color: #eaae89; }
+.launcher-update progress { width: 100%; height: 5px; accent-color: var(--green); margin-top: 12px; }
+.update-actions { display: flex; align-items: stretch; flex-direction: column; gap: 9px; margin-top: 15px; }
+.update-actions button { display: flex; justify-content: center; align-items: center; gap: 8px; border: 1px solid #35543b; border-radius: 7px; min-height: 35px; padding: 8px 10px; font-size: 11px; cursor: pointer; }
+.update-actions button:disabled { cursor: default; opacity: .48; }
+.update-actions button svg { width: 14px; height: 14px; }
+.update-primary { background: var(--green); color: #102313; font-weight: 800; }
+.update-primary:hover:not(:disabled) { background: #91df93; }
+.update-check { background: transparent; color: #b6c6b9; }
+.update-check:hover:not(:disabled) { background: #263b2c; }
+.update-notes { margin-top: 10px; font-size: 11px; color: #b6c6b9; }
+.update-notes summary { cursor: pointer; }
+.update-notes p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.launcher-update .update-hint { color: #a8a58e; }
 .status-error, .build-state .status-error, .text-setting > .status-error { color: #eea18f; overflow-wrap: anywhere; }
 .build-state .status-error { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 

@@ -63,6 +63,27 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   validated `aoc` rollout; other servers are unaffected. Old launchers without
   admission proof will be rejected after enforcement. This authenticates an
   account's permission, not the integrity of an unmodified launcher binary.
+- Application updates are a separate trust domain from Minecraft profiles.
+  The only channel is `https://shacraft.ru/launcher/updates/stable.json`.
+  Both release metadata and the installer need a valid Minisign signature
+  under the separate updater public key embedded in `tauri.conf.json`.
+  Never reuse the profile signing key, accept unsigned metadata, or allow IPC
+  to select an update URL, key, version, installer argument or destination.
+  Downloads require HTTPS without redirects on exact `shacraft.ru`, below
+  `/downloads/shacraft-launcher/<signed-version>/`, and are bounded to 256 MiB.
+  Stable versions must increase. The native layer owns every candidate.
+- Linux self-update is supported for AppImage only. Preserve executable
+  permissions and use same-directory atomic replacement after verification.
+  Windows/macOS use the pinned Tauri installer implementation; the vendored
+  updater change only exposes construction from already verified metadata to
+  avoid a second, unbounded remote JSON request. See its patch notes.
+  Installation holds game/install/account permits until restart. The game
+  permit lasts until the tracked Java child exits. These are process-local
+  guards; another launcher process is not a cross-process lock.
+- The updater signing private key stays outside Git on the operator's local
+  machine; CI receives no production key. Publish only verified packages,
+  public signatures and signed feed. Updater signatures are separate from
+  Windows Authenticode and macOS code signing/notarization.
 
 ## Layout
 
@@ -99,6 +120,8 @@ payload are in `/root/shacraft` on the ShaCraft host; see
     canonical identity and child-only admission environment.
   - `launch.rs` — builds and spawns the actual `java` process; admission secrets
     must remain outside its argument substitution and JVM argfile paths.
+  - `updater.rs`, `commands/updater.rs` — authenticated release metadata,
+    bounded package download, platform installation and guarded restart.
 - `src-tauri/src/settings.rs` — durable local preferences; maintain backward
   compatibility with already-written JSON.
 - `docs/manifest-v1.md` — signed manifest envelope and payload contract
@@ -106,8 +129,9 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 - `docs/game-trust-boundary.md` — the Mojang/NeoForge/Microsoft/Adoptium
   trust domains used to install and run the game itself.
 - `.github/workflows/check.yml` — push/PR UI checks and Linux Rust tests.
-- `.github/workflows/build.yml` — main-push/manual cross-platform builds with artifacts;
-  not a signed release or updater publication.
+- `.github/workflows/build.yml` — main-push/manual cross-platform CI artifacts;
+  updater signing is explicitly disabled there. Local release signing and
+  atomic feed publication are documented in `docs/launcher-updates.md`.
 
 ## Verification
 

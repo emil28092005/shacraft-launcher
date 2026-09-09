@@ -163,6 +163,7 @@ pub(crate) async fn launch_game(
     let game_dir = data_dir(&app)?.join("game");
     let data_dir = data_dir(&app)?;
     let permit = state.installation.acquire("Installation")?;
+    let game_permit = state.game.acquire("Игра")?;
     let account_operation = state.shacraft_account.clone();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -219,7 +220,9 @@ pub(crate) async fn launch_game(
         let watch_app = app.clone();
         let watch_profile_id = profile_id.clone();
         std::thread::spawn(move || {
+            let game_permit = game_permit;
             let exit_code = child.wait().ok().and_then(|status| status.code());
+            drop(game_permit);
             let _ = watch_app.emit(
                 "game-exited",
                 GameExited {

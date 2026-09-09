@@ -37,14 +37,27 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 Build включает строгий TypeScript. GitHub Actions проверяет UI и Rust на
 push/PR; workflow на main-push/ручном запуске собирает Windows x64, Linux x64, macOS Intel
-и Apple Silicon и сохраняет артефакты. Подпись релиза/автообновления ещё впереди.
+и Apple Silicon и сохраняет неподписанные артефакты. Релизный оператор
+подписывает проверенные пакеты и metadata локальным ключом; CI его не получает.
 Используемые macOS runners соответствуют [списку GitHub](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+## Обновление лаунчера
+
+С версии 0.1.3 настройки содержат проверку обновлений, установку с прогрессом
+и перезапуск. Лаунчер также проверяет новые версии при старте, но устанавливает
+их только по кнопке. Подписи пакета и сведений о версии обязательны.
+Закройте запущенный Minecraft перед установкой обновления.
+
+В Linux используйте AppImage; deb и dev-бинарник обновляются вручную.
+С версии 0.1.2 нужен один ручной переход на новый AppImage. Пакеты Windows/macOS
+с этим механизмом ещё требуют публикации и проверки установки.
 
 ## Навигация
 
 - [Архитектура](docs/launcher-architecture.md) — компоненты, данные, IPC.
 - [Trust boundaries](docs/game-trust-boundary.md) — доверенные источники игры.
 - [Manifest](docs/manifest-v1.md) — подписанный контракт модпака.
+- [Обновления](docs/launcher-updates.md) — подпись, публикация и восстановление.
 - [PLAN.md](PLAN.md) — ограничения и следующие шаги.
 - [AGENTS.md](AGENTS.md) — инструкции для следующего разработчика/агента.
 

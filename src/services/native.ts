@@ -6,6 +6,7 @@ import type {
   GameExitedPayload, InstallProgressPayload, JavaInstallation, LauncherSettings,
   LinkChallenge, LinkStatus, NativeHost, ProfileInspection, ServerStatus,
   ShaCraftAccount, ShaCraftLoginResult, SyncResult,
+  LauncherUpdateStatus, LauncherUpdateProgress,
 } from '../types/launcher'
 
 export const isNative = () => typeof window !== 'undefined' && isTauri()
@@ -31,6 +32,10 @@ export const native = {
   serverStatus: (profileId: string) => invoke<ServerStatus>('get_server_status', { profileId }),
   installGame: (profileId: string) => invoke<void>('ensure_game_installed', { profileId }),
   launchGame: (profileId: string) => invoke<void>('launch_game', { profileId }),
+  updateStatus: () => invoke<LauncherUpdateStatus>('get_launcher_update_status'),
+  checkUpdate: () => invoke<LauncherUpdateStatus>('check_launcher_update'),
+  installUpdate: () => invoke<void>('install_launcher_update'),
+  restartAfterUpdate: () => invoke<void>('restart_launcher_after_update'),
 }
 
 export const windowControls = {
@@ -46,5 +51,11 @@ export function watchGame(handlers: {
   return createSubscription([
     listen<InstallProgressPayload>('game-install-progress', ({ payload }) => handlers.progress(payload)),
     listen<GameExitedPayload>('game-exited', ({ payload }) => handlers.exited(payload)),
+  ])
+}
+
+export function watchLauncherUpdate(progress: (payload: LauncherUpdateProgress) => void) {
+  return createSubscription([
+    listen<LauncherUpdateProgress>('launcher-update-progress', ({ payload }) => progress(payload)),
   ])
 }

@@ -25,8 +25,9 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf minisign
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml

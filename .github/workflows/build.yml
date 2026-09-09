@@ -23,10 +23,10 @@ jobs:
             args: --bundles nsis,msi
           - name: macOS Apple Silicon
             os: macos-15
-            args: --target aarch64-apple-darwin --bundles dmg
+            args: --target aarch64-apple-darwin --bundles app,dmg
           - name: macOS Intel
             os: macos-15-intel
-            args: --target x86_64-apple-darwin --bundles dmg
+            args: --target x86_64-apple-darwin --bundles app,dmg
 
     runs-on: ${{ matrix.os }}
 
@@ -45,7 +45,26 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-      - run: npm run tauri:build -- ${{ matrix.args }}
+      # These are build/test artifacts. Release signing happens separately with
+      # the operator-held key; CI never receives that key or publishes stable.json.
+      - run: npm run tauri:build -- --config scripts/tauri-unsigned.json ${{ matrix.args }}
+      - name: Prepare unsigned macOS updater archive
+        if: runner.os == 'macOS'
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import tarfile
+          apps = list(Path('src-tauri/target').glob('*/release/bundle/macos/*.app'))
+          if len(apps) != 1:
+              raise SystemExit('Expected exactly one macOS application bundle')
+          app = apps[0]
+          version = json.loads(Path('src-tauri/tauri.conf.json').read_text())['version']
+          architecture = app.parts[2].split('-')[0]
+          archive = app.parent / f'ShaCraft.Launcher_{version}_{architecture}.app.tar.gz'
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(app, arcname=app.name)
+          PY
       - name: Upload Windows installers
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -70,4 +89,6 @@ jobs:
         with:
           name: shacraft-launcher-${{ matrix.name == 'macOS Apple Silicon' && 'macos-arm64' || 'macos-x64' }}
           if-no-files-found: error
-          path: src-tauri/target/*/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/*/release/bundle/dmg/*.dmg
+            src-tauri/target/*/release/bundle/macos/*.app.tar.gz

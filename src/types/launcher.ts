@@ -80,3 +80,18 @@ export interface GameExitedPayload {
   profileId: string
   exitCode: number | null
 }
+
+export interface LauncherUpdateStatus {
+  currentVersion: string
+  supported: boolean
+  reason?: string | null
+  version?: string | null
+  notes?: string | null
+  stage?: 'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'ready'
+}
+
+export interface LauncherUpdateProgress {
+  stage: 'downloading' | 'installing' | 'ready'
+  downloadedBytes: number
+  totalBytes?: number | null
+}
