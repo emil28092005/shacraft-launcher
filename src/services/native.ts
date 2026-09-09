@@ -5,7 +5,7 @@ import { createSerialQueue, createSubscription, singleFlight } from './async'
 import type {
   GameExitedPayload, InstallProgressPayload, JavaInstallation, LauncherSettings,
   LinkChallenge, LinkStatus, NativeHost, ProfileInspection, ServerStatus,
-  ShaCraftAccount, ShaCraftLoginResult, SyncResult,
+  ShaCraftAccount, ShaCraftLoginResult, SyncResult, ProfileMetadata, PreparationResult, LegacyMod, LegacySelection, LegacyBackup,
 } from '../types/launcher'
 
 export const isNative = () => typeof window !== 'undefined' && isTauri()
@@ -16,6 +16,9 @@ const restoreAccount = singleFlight(() => accountRequests.enqueue(() => invoke<S
 // commands directly and cannot pass arbitrary URLs or filesystem paths.
 export const native = {
   host: () => invoke<NativeHost>('native_host'),
+  metadata: (profileId: string) => invoke<ProfileMetadata>('profile_metadata', { profileId }),
+  legacyMods: (profileId: string) => invoke<LegacyMod[]>('legacy_mods', { profileId }),
+  backupLegacyMods: (profileId: string, selections: LegacySelection[]) => invoke<LegacyBackup>('backup_legacy_mods', { profileId, selections }),
   loadSettings: () => invoke<LauncherSettings>('load_settings'),
   saveSettings: (settings: LauncherSettings) => invoke<LauncherSettings>('save_settings', { settings }),
   detectJava: () => invoke<JavaInstallation | null>('detect_java'),
@@ -28,8 +31,9 @@ export const native = {
   startLink: (nickname: string) => accountRequests.enqueue(() => invoke<LinkChallenge>('shacraft_start_link', { nickname })),
   linkStatus: (challengeId: number) => accountRequests.enqueue(() => invoke<LinkStatus>('shacraft_link_status', { challengeId })),
   serverStatus: (profileId: string) => invoke<ServerStatus>('get_server_status', { profileId }),
-  installGame: (profileId: string) => invoke<void>('ensure_game_installed', { profileId }),
-  launchGame: (profileId: string) => invoke<void>('launch_game', { profileId }),
+  installGame: (profileId: string) => invoke<PreparationResult>('ensure_game_installed', { profileId }),
+  launchGame: (profileId: string) => invoke<PreparationResult>('launch_game', { profileId }),
+  launchOnboarding: (profileId: string, nickname: string) => invoke<PreparationResult>('launch_onboarding', { profileId, nickname }),
 }
 
 export const windowControls = {

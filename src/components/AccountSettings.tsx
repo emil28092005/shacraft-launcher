@@ -3,7 +3,7 @@ import { LogOut, Users } from 'lucide-react'
 import type { useAccount } from '../hooks/useAccount'
 import { isNative } from '../services/native'
 
-export function AccountSettings({ session, locked }: { session: ReturnType<typeof useAccount>; locked: boolean }) {
+export function AccountSettings({ session, locked, onOnboard }: { session: ReturnType<typeof useAccount>; locked: boolean; onOnboard?: (nickname: string) => Promise<void> }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [registering, setRegistering] = useState(false)
@@ -49,11 +49,17 @@ export function AccountSettings({ session, locked }: { session: ReturnType<typeo
             <small>Подтвердите владение ником на сервере Aeronautics.</small>
           </label>
           <button className="setting-row" type="submit" disabled={disabled || session.linking}>
-            <span>{session.linking ? 'Ожидаем подтверждения…' : 'Привязать ник'}</span>
+            <span>{session.linking ? 'Ожидаем подтверждения…' : 'Привязать ник через открытую игру'}</span>
           </button>
+          {onOnboard && <button className="setting-row" type="button" disabled={disabled || session.linking || !/^[A-Za-z0-9_]{3,16}$/.test(nickname)}
+            onClick={() => { void onOnboard(nickname) }}><span>Установить и войти для подтверждения</span></button>}
+          <p className="account-hint">Нужна действующая проходка и ник в whitelist. Новый ник: /register, существующий: /login с игровым паролем. После входа выполните команду подтверждения.</p>
         </form>
       )}
-      {account && linkedNickname && <div className="setting-row static"><span>Игровой ник</span><small>{linkedNickname}</small></div>}
+      {account && linkedNickname && <>
+        <div className="setting-row static"><span>Игровой ник</span><small>{linkedNickname}</small></div>
+        <button className="setting-row" type="button" disabled={disabled || session.linking} onClick={() => { void session.startLink(linkedNickname) }}><span>Повторно подтвердить этот ник в игре</span></button>
+      </>}
       {session.linkMessage && <p className="account-hint" role="status">{session.linkMessage}</p>}
       {session.error && <p className="status-error account-hint" role="alert">{session.error}</p>}
       {account && <button className="setting-row" disabled={disabled} onClick={session.logout}><span><LogOut />Выйти из ShaCraft</span></button>}

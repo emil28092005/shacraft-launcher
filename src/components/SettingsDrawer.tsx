@@ -13,9 +13,11 @@ interface SettingsDrawerProps {
   preferences: ReturnType<typeof useSettings>
   session: ReturnType<typeof useAccount>
   onClose: () => void
+  requiredJava?: number
+  onOnboard?: (nickname: string) => Promise<void>
 }
 
-export function SettingsDrawer({ open, locked, host, java, preferences, session, onClose }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, locked, host, java, preferences, session, onClose, requiredJava, onOnboard }: SettingsDrawerProps) {
   const { settings, loaded, saving, error } = preferences
   const closeButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -53,19 +55,20 @@ export function SettingsDrawer({ open, locked, host, java, preferences, session,
             onChange={(event) => preferences.updateRam(Number(event.target.value))} />
           <small>Для Aeronautics рекомендуется 6 ГБ</small>
         </label>
-        <AccountSettings session={session} locked={locked || saving} />
+        <AccountSettings session={session} locked={locked || saving} onOnboard={onOnboard} />
         <div className="setting-row static"><span><FolderOpen />Папка игры</span><small>{host ? 'В каталоге лаунчера' : 'Определяется…'}</small></div>
         <div className="setting-row static">
           <span><Wrench />Java</span>
           <small>{java === undefined ? host ? 'Проверяем…' : 'Проверяется в приложении'
-            : java?.major === 21 ? 'Java 21 найдена' : java ? `Нужна Java 21 · найдена ${java.major}`
-              : 'Лаунчер установит Java 21 автоматически'}</small>
+            : requiredJava === undefined ? 'Требование Java уточняется по сборке'
+              : java?.major === requiredJava ? `Java ${requiredJava} найдена` : java ? `Нужна Java ${requiredJava} · найдена ${java.major}`
+                : `Лаунчер установит Java ${requiredJava} автоматически`}</small>
         </div>
         <div className="settings-feedback" aria-live="polite">
           {error && <><p className="status-error">{error}</p><button onClick={preferences.retry} disabled={locked || saving}>Повторить</button></>}
           {saving && <p>Сохраняем настройки…</p>}
         </div>
-        <div className="drawer-note">{host ? `Данные лаунчера: ${host.dataDir}` : 'Java 21 будет управляться лаунчером автоматически.'}</div>
+        <div className="drawer-note">{host ? `Данные лаунчера: ${host.dataDir}` : 'Java будет подобрана по подписанной сборке.'}</div>
       </aside>
     </>
   )

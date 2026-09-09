@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { LegacyModsDialog } from './components/LegacyModsDialog'
 import { Library } from './components/Library'
 import { RecoveryCodesModal } from './components/RecoveryCodesModal'
 import { PlayDock } from './components/PlayDock'
@@ -17,6 +18,7 @@ import { installStageLabels } from './state/game'
 export function App() {
   const [selected, setSelected] = useState(servers[0])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [legacyOpen, setLegacyOpen] = useState(false)
   const [windowError, setWindowError] = useState<string | null>(null)
   const preferences = useSettings()
   const session = useAccount()
@@ -25,6 +27,9 @@ export function App() {
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
   const desktop = isNative()
   const profile = launcher.profiles[selected.profileId]
+  const metadata = launcher.metadata[selected.profileId]
+  const displayed = { ...selected, version: metadata ? `Minecraft ${metadata.minecraftVersion}` : 'Версия уточняется',
+    loader: metadata ? `${metadata.loaderKind} ${metadata.loaderVersion}` : 'По подписанной сборке' }
   const ready = profile?.inspection?.upToDate === true
   const operation = launcher.game.operation
   const busy = operation.phase !== 'idle'
@@ -50,6 +55,11 @@ export function App() {
   else if (checking) label = 'Проверяем…'
   else if (!ready) label = 'Проверить'
 
+  const onboard = async (nickname: string) => {
+    if (busy || settingsBlocked || !launcher.eventsReady) return
+    const result = await launcher.onboard(selected.profileId, nickname)
+    if (result?.onboarding) session.acceptChallenge(result.onboarding)
+  }
   const primary = () => {
     if (disabled) return
     if (access !== 'ready') setSettingsOpen(true)
@@ -59,19 +69,20 @@ export function App() {
   return (
     <div className="app-shell">
       <Titlebar host={launcher.host} onError={setWindowError} />
-      <div className="workspace" inert={session.recoveryCodes.length > 0}>
+      <div className="workspace" inert={session.recoveryCodes.length > 0 || legacyOpen}>
         <Library selected={selected} profiles={launcher.profiles} account={session.account}
           native={desktop} locked={busy || session.busy} onSelect={setSelected} onSettings={() => setSettingsOpen(true)} />
-        <ServerStage server={selected} status={serverStatus}>
-          <PlayDock server={selected} operation={operation} profile={profile}
+        <ServerStage server={displayed} status={serverStatus} javaMajor={metadata?.javaMajor}>
+          <PlayDock server={displayed} operation={operation} profile={profile}
             memoryGb={preferences.settings.memoryMb / 1024} native={desktop}
             needsLogin={access === 'login'} needsLink={access === 'link'}
             error={error} label={label} primaryDisabled={disabled} repairDisabled={repairDisabled}
-            onPrimary={primary} onRepair={() => { if (!repairDisabled) void launcher.repair(selected.profileId) }} />
+            onLegacy={() => setLegacyOpen(true)} onPrimary={primary} onRepair={() => { if (!repairDisabled) void launcher.repair(selected.profileId) }} />
         </ServerStage>
       </div>
       <SettingsDrawer open={settingsOpen && !session.recoveryCodes.length} locked={busy} preferences={preferences}
-        session={session} host={launcher.host} java={launcher.java} onClose={closeSettings} />
+        session={session} host={launcher.host} java={launcher.java} requiredJava={metadata?.javaMajor} onOnboard={onboard} onClose={closeSettings} />
+      {legacyOpen && <LegacyModsDialog profileId={selected.profileId} onClose={() => setLegacyOpen(false)} onChanged={() => { void launcher.refreshProfile(selected.profileId) }} />}
       <RecoveryCodesModal codes={session.recoveryCodes} onAcknowledge={session.acknowledgeRecoveryCodes} />
     </div>
   )
