@@ -506,6 +506,12 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    fn trusted_temporary_root() -> std::path::PathBuf {
+        // Resolve only the OS-provided fixture anchor. The profile root, its
+        // parent and payload descendants retain their production link checks.
+        std::env::temp_dir().canonicalize().unwrap()
+    }
+
     fn manifest(hash: String, size: u64) -> Manifest {
         Manifest {
             schema_version: 1,
@@ -531,7 +537,7 @@ mod tests {
 
     #[test]
     fn reports_missing_and_matching_files() {
-        let root = std::env::temp_dir().join(format!(
+        let root = trusted_temporary_root().join(format!(
             "shacraft-launcher-test-{}-{}",
             process::id(),
             SystemTime::now()
@@ -559,7 +565,7 @@ mod tests {
 
     #[test]
     fn edited_seed_files_remain_up_to_date() {
-        let root = std::env::temp_dir().join(format!(
+        let root = trusted_temporary_root().join(format!(
             "shacraft-seed-test-{}-{}",
             process::id(),
             SystemTime::now()
@@ -577,7 +583,7 @@ mod tests {
 
     #[test]
     fn preserves_changed_seed_files_as_current() {
-        let root = std::env::temp_dir().join(format!(
+        let root = trusted_temporary_root().join(format!(
             "shacraft-launcher-seed-test-{}-{}",
             process::id(),
             SystemTime::now()
@@ -600,7 +606,7 @@ mod tests {
     #[test]
     fn refuses_linked_profile_directories() {
         use std::os::unix::fs::symlink;
-        let root = std::env::temp_dir().join(format!(
+        let root = trusted_temporary_root().join(format!(
             "shacraft-link-test-{}-{}",
             process::id(),
             SystemTime::now()
