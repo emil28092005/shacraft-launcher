@@ -30,8 +30,12 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   embedded public key and `keyId` **before** parsing the payload.
 - `src-tauri/src/manifest.rs` then validates paths, SHA-256, sizes, HTTPS and
   allowed ShaCraft hosts. Do not weaken this whitelist.
-- `src-tauri/src/profile.rs` downloads to a temporary sibling file, verifies
-  size + SHA-256, and atomically replaces only launcher-managed files.
+- `profile.rs` / `inventory.rs` stage verified files, journal replacements and
+  retire only previously owned, unchanged managed files. Unknown files are not
+  silently adopted or deleted. Legacy mod backup requires explicit selection.
+- Play/Repair use one `remote::VerifiedSnapshot` from verification through spawn.
+  `installation_lock.rs` protects the shared game tree across processes and
+  retains a PID + start-time lease while Minecraft is alive.
 - This ShaCraft manifest is the **only** source of truth for which
   Minecraft version / NeoForge version / Java major a profile needs
   (`Manifest.minecraft`) and for mod/config files. It never supplies a URL
@@ -45,7 +49,12 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   the nickname is fetched from the verified `aoc` account link; the legacy
   nickname in `settings.json` is ignored as an identity source. Server-side
   whitelist enforcement and LoginSystem remain the final access-control
-  boundary, including for old launcher versions.
+  boundary, including for old launcher versions. The explicit onboarding command
+  is the only unlinked launch path: a short-lived server grant goes to the game
+  child environment only, never IPC responses, argv or files. The signed pack
+  must contain ShaCraft Game Bridge; it binds the grant to the game session,
+  requires LoginSystem authentication and an explicit one-time proof command.
+  Existing links retain legacy provenance; status polling cannot create links.
 
 ## Layout
 
@@ -69,7 +78,9 @@ payload are in `/root/shacraft` on the ShaCraft host; see
     build on this rather than each rolling their own.
   - `mojang.rs` — vanilla Minecraft trust boundary + the generic
     `inheritsFrom` version-JSON merge (shared with NeoForge's profile).
-  - `neoforge.rs` — runs NeoForge's official installer headlessly.
+  - `neoforge.rs` / `neoforge_repair.rs` — verified official installer, isolated
+    processor rebuild, checked embedded JSON and generated-output receipts.
+    Never hash legacy generated artifacts as an initial trusted baseline.
   - `runtime.rs` — Java 21 auto-provisioning via Eclipse Adoptium.
   - `msa.rs` — Microsoft/Xbox/Minecraft Services login; see
     `MSA_CLIENT_ID`'s doc comment before touching login — it is currently a

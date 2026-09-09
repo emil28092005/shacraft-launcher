@@ -90,3 +90,25 @@ URL — cannot redirect a download to an attacker-controlled host in any of
 these domains. When adding a new game-related download, verify its host is
 one of the ones above (or add a new hardcoded constant following the same
 pattern) rather than accepting a URL from anywhere else.
+
+
+## Generated NeoForge artifacts and Java selection
+
+NeoForge 21.1.248's actual installer does not publish processor-output hashes.
+The launcher therefore validates the installer SHA-256, extracts its expected
+version JSON and a scoped processor recipe, verifies the vanilla input against
+Mojang, and runs that installer in a fresh staging tree. Generated JARs must
+be readable ZIPs with valid entries. A receipt commits the generated hashes,
+installer digest and recipe identity only after successful verified promotion.
+This is provenance from a trusted computation, not independent publisher
+checksums for generated files. Later corruption invalidates the receipt and
+triggers clean reconstruction; a nonempty old file is never enough. Interrupted
+promotion has no valid receipt and is repaired on the next preparation.
+Only recipe-scoped generated artifacts are promoted; user profile files are
+outside this tree. Staging can remain after an abrupt kill and is never trusted
+as an installation. The receipt currently lives under the shared game cache.
+
+Java discovery evaluates JAVA_HOME and PATH candidates independently for the
+exact required major. A wrong-major JAVA_HOME no longer hides a valid PATH
+installation. Only if no matching candidate exists is a managed runtime
+provisioned. The UI reads required versions from verified profile metadata.
