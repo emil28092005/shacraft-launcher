@@ -45,9 +45,21 @@ pub struct LoginResult {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct LinkStart {
+    pub proof_version: u32,
+    pub server_id: String,
     pub challenge_id: i64,
     pub expires_in_seconds: u64,
     pub registered_on_server: bool,
+    pub proof_code: String,
+    pub mc_username: String,
+    pub player_uuid: String,
+}
+
+#[derive(Deserialize)]
+pub struct OnboardingGrant {
+    #[serde(flatten)]
+    pub challenge: LinkStart,
+    pub grant_token: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -203,7 +215,92 @@ pub fn start_link(
     if !response.status().is_success() {
         return Err(api_error(response));
     }
-    response.json::<LinkStart>().map_err(AccountError::Network)
+    let value = response
+        .json::<LinkStart>()
+        .map_err(AccountError::Network)?;
+    validate_challenge(&value, server_id, nickname)?;
+    Ok(value)
+}
+
+pub fn valid_nickname(name: &str) -> bool {
+    (3..=16).contains(&name.len()) && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+
+fn validate_challenge(
+    value: &LinkStart,
+    server_id: &str,
+    requested: &str,
+) -> Result<(), AccountError> {
+    if value.proof_version != 1
+        || value.server_id != server_id
+        || !valid_nickname(requested)
+        || value.mc_username != requested
+        || value.player_uuid != crate::session::offline_uuid(requested)
+        || value.challenge_id <= 0
+        || value.expires_in_seconds == 0
+        || value.expires_in_seconds > 600
+        || value.proof_code.len() != 32
+        || !value.proof_code.bytes().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err(AccountError::Api(
+            "Сервер вернул неподходящее подтверждение ника".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn start_onboarding(data_dir: &Path, nickname: &str) -> Result<OnboardingGrant, AccountError> {
+    if !valid_nickname(nickname) {
+        return Err(AccountError::Api("Неверный игровой ник".into()));
+    }
+    let response = client()?
+        .post(format!("{API_ORIGIN}/api/launcher/onboarding/start"))
+        .bearer_auth(load_session(data_dir)?)
+        .json(&serde_json::json!({"server_id":"aoc","mc_username":nickname}))
+        .send()
+        .map_err(AccountError::Network)?;
+    if !response.status().is_success() {
+        return Err(api_error(response));
+    }
+    let grant: OnboardingGrant = response.json().map_err(AccountError::Network)?;
+    validate_challenge(&grant.challenge, "aoc", nickname)?;
+    if grant.grant_token.len() < 32
+        || grant.grant_token.len() > 256
+        || !grant
+            .grant_token
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
+        return Err(AccountError::Api(
+            "Некорректное разрешение первого входа".into(),
+        ));
+    }
+    Ok(grant)
+}
+
+pub fn validate_onboarding(data_dir: &Path, grant: &OnboardingGrant) -> Result<(), AccountError> {
+    let response = client()?.post(format!("{API_ORIGIN}/api/launcher/onboarding/validate"))
+        .bearer_auth(load_session(data_dir)?)
+        .json(&serde_json::json!({"challenge_id":grant.challenge.challenge_id,"grant_token":grant.grant_token}))
+        .send().map_err(AccountError::Network)?;
+    if !response.status().is_success() {
+        return Err(api_error(response));
+    }
+    let data: serde_json::Value = response.json().map_err(AccountError::Network)?;
+    if data["server_id"] != "aoc"
+        || data["mc_username"] != grant.challenge.mc_username
+        || data["player_uuid"] != grant.challenge.player_uuid
+        || data["challenge_id"] != grant.challenge.challenge_id
+        || data["proof_version"] != 1
+        || !data["expires_in_seconds"]
+            .as_u64()
+            .is_some_and(|n| n > 0 && n <= 600)
+    {
+        return Err(AccountError::Api(
+            "Первый вход не подтверждён сервером".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn link_status(data_dir: &Path, challenge_id: i64) -> Result<LinkStatus, AccountError> {
@@ -237,6 +334,39 @@ mod tests {
         fs, process,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn challenge_requires_matching_server_exact_nickname_uuid_and_bounded_nonce() {
+        let valid = super::LinkStart {
+            proof_version: 1,
+            server_id: "aoc".into(),
+            challenge_id: 1,
+            expires_in_seconds: 600,
+            registered_on_server: false,
+            proof_code: "a".repeat(32),
+            mc_username: "ShaCraft_Test".into(),
+            player_uuid: crate::session::offline_uuid("ShaCraft_Test"),
+        };
+        assert!(super::validate_challenge(&valid, "aoc", "ShaCraft_Test").is_ok());
+        assert!(super::validate_challenge(&valid, "create", "ShaCraft_Test").is_err());
+        assert!(super::validate_challenge(&valid, "aoc", "shacraft_test").is_err());
+        let mut wrong = valid.clone();
+        wrong.player_uuid = crate::session::offline_uuid("shacraft_test");
+        assert!(super::validate_challenge(&wrong, "aoc", "ShaCraft_Test").is_err());
+        for ttl in [0, 601] {
+            wrong = valid.clone();
+            wrong.expires_in_seconds = ttl;
+            assert!(super::validate_challenge(&wrong, "aoc", "ShaCraft_Test").is_err());
+        }
+        wrong = valid.clone();
+        wrong.proof_version = 0;
+        assert!(super::validate_challenge(&wrong, "aoc", "ShaCraft_Test").is_err());
+        for code in ["a".repeat(31), "g".repeat(32), "a".repeat(33)] {
+            wrong = valid.clone();
+            wrong.proof_code = code;
+            assert!(super::validate_challenge(&wrong, "aoc", "ShaCraft_Test").is_err());
+        }
+    }
 
     fn temporary_directory() -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

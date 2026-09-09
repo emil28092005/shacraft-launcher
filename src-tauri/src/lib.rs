@@ -1,4 +1,6 @@
 mod download;
+mod installation_lock;
+mod inventory;
 mod java;
 mod launch;
 mod manifest;
@@ -28,6 +30,9 @@ pub fn run() {
             commands::profiles::inspect_remote_profile,
             commands::profiles::sync_remote_profile,
             commands::profiles::get_server_status,
+            commands::profiles::profile_metadata,
+            commands::profiles::legacy_mods,
+            commands::profiles::backup_legacy_mods,
             commands::preferences::load_settings,
             commands::preferences::save_settings,
             commands::shacraft::shacraft_authenticate,
@@ -39,7 +44,8 @@ pub fn run() {
             commands::account::get_account,
             commands::account::logout,
             commands::game::ensure_game_installed,
-            commands::game::launch_game
+            commands::game::launch_game,
+            commands::game::launch_onboarding
         ])
         .run(tauri::generate_context!())
         .expect("error while running ShaCraft Launcher");

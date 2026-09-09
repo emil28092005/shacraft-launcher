@@ -25,6 +25,9 @@
 //! arguments already present on the merged profile) and is intentionally
 //! never added to our own classpath.
 
+#[path = "neoforge_repair.rs"]
+mod repair;
+
 use crate::download::{self, Checksum, DownloadError, ProgressCallback};
 use crate::mojang::VersionJson;
 use reqwest::blocking::Client;
@@ -56,6 +59,7 @@ pub enum NeoForgeError {
     Download(DownloadError),
     Io(io::Error),
     InvalidJson(serde_json::Error),
+    InvalidInstallation(String),
     InstallerFailed {
         exit_code: Option<i32>,
         output_tail: String,
@@ -76,6 +80,9 @@ impl fmt::Display for NeoForgeError {
             Self::Download(error) => write!(formatter, "{error}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::InvalidJson(error) => write!(formatter, "invalid NeoForge version JSON: {error}"),
+            Self::InvalidInstallation(message) => {
+                write!(formatter, "invalid NeoForge installation: {message}")
+            }
             Self::InstallerFailed {
                 exit_code,
                 output_tail,
@@ -166,25 +173,8 @@ pub fn installed_version_json_path(game_dir: &Path, loader_version: &str) -> Pat
         .join(format!("neoforge-{loader_version}.json"))
 }
 
-fn patched_client_path(game_dir: &Path, loader_version: &str) -> PathBuf {
-    game_dir
-        .join("libraries/net/neoforged/neoforge")
-        .join(loader_version)
-        .join(format!("neoforge-{loader_version}-client.jar"))
-}
-
-fn is_nonempty_file(path: &Path) -> bool {
-    path.metadata()
-        .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
-}
-
-fn installation_complete(game_dir: &Path, loader_version: &str) -> bool {
-    is_nonempty_file(&installed_version_json_path(game_dir, loader_version))
-        && is_nonempty_file(&patched_client_path(game_dir, loader_version))
-}
-
 /// The installer jar bundles its own `install_profile.json`, which lists
-/// exactly which libraries it will download and which processors it will
+/// which libraries it may download and which processors it may
 /// run to patch the client — the same manifest the installer itself reads.
 /// Reading it upfront gives a real, version-agnostic total for progress
 /// reporting instead of a guessed constant.
@@ -316,66 +306,51 @@ fn run_installer_with_progress(
     Ok((status.code(), tail))
 }
 
-/// Ensures NeoForge `loader_version` is installed into the shared
-/// `game_dir` (vanilla libraries/version must already be there so the
-/// installer can reuse them). No-op if already installed. Runs the
-/// installer headlessly with `java_executable`; its own network calls go
-/// straight to `maven.neoforged.net`/Mojang, outside our control, which is
-/// an accepted trust delegation to NeoForge's official tooling once the
-/// installer binary itself is SHA-256 verified. `on_progress` reports real
-/// progress (installer-confirmed library downloads plus patch-processor
-/// steps, read from the installer's own `install_profile.json`) while it
-/// runs; it fires once with `(1, 1)` when already installed.
+/// Verifies a generated installation against its provenance receipt. Legacy
+/// installations and corrupt outputs are rebuilt by the verified official
+/// installer in an empty staging directory. The caller must ensure vanilla's
+/// client JAR first; the staged copy is checked against `vanilla` again before
+/// any processor runs. No existing generated artifacts are adopted as trusted.
 pub fn ensure_client_installed(
     client: &Client,
     java_executable: &Path,
     game_dir: &Path,
     cache_dir: &Path,
     loader_version: &str,
+    vanilla: &VersionJson,
     on_progress: &ProgressCallback,
 ) -> Result<VersionJson, NeoForgeError> {
-    let version_json_path = installed_version_json_path(game_dir, loader_version);
-    if !installation_complete(game_dir, loader_version) {
-        ensure_launcher_profiles_stub(game_dir)?;
-        let installer_path = ensure_installer(client, cache_dir, loader_version)?;
-
-        // A leftover version JSON makes some installer versions treat the
-        // profile as already installed even when the patched client was
-        // deleted or quarantined. Remove only that generated marker so the
-        // official installer is forced to rebuild the incomplete profile.
-        match fs::remove_file(&version_json_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(NeoForgeError::Io(error)),
-        }
-
-        let (total_libraries, total_processors) =
-            read_install_profile_counts(&installer_path).unwrap_or((0, 0));
-        let total = (total_libraries + total_processors).max(1);
-        on_progress(0, total);
-
-        let (exit_code, tail) = run_installer_with_progress(
-            java_executable,
-            &installer_path,
-            game_dir,
-            cache_dir,
-            total_libraries,
-            total,
-            on_progress,
-        )?;
-        if !installation_complete(game_dir, loader_version) {
-            return Err(NeoForgeError::InstallerFailed {
-                exit_code,
-                output_tail: tail,
-            });
-        }
-        on_progress(total, total);
-    } else {
+    let installer_path = ensure_installer(client, cache_dir, loader_version)?;
+    let mut rebuilt = false;
+    let version = repair::ensure(
+        &installer_path,
+        game_dir,
+        cache_dir,
+        loader_version,
+        vanilla,
+        |stage| {
+            rebuilt = true;
+            let (total_libraries, total_processors) =
+                read_install_profile_counts(&installer_path).unwrap_or((0, 0));
+            let total = (total_libraries + total_processors).max(1);
+            on_progress(0, total);
+            run_installer_with_progress(
+                java_executable,
+                &installer_path,
+                stage,
+                cache_dir,
+                total_libraries,
+                total,
+                on_progress,
+            )?;
+            on_progress(total, total);
+            Ok(())
+        },
+    )?;
+    if !rebuilt {
         on_progress(1, 1);
     }
-
-    let bytes = fs::read(&version_json_path)?;
-    serde_json::from_slice(&bytes).map_err(NeoForgeError::InvalidJson)
+    Ok(version)
 }
 
 #[cfg(test)]
@@ -410,25 +385,6 @@ mod tests {
         assert_eq!(second, "custom-content");
         assert!(first.contains("\"profiles\""));
         fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn incomplete_install_is_not_accepted() {
-        let dir = std::env::temp_dir().join(format!(
-            "shacraft-neoforge-completeness-test-{}",
-            std::process::id()
-        ));
-        let version = "21.1.248";
-        let json = installed_version_json_path(&dir, version);
-        fs::create_dir_all(json.parent().unwrap()).unwrap();
-        fs::write(&json, b"{}").unwrap();
-        assert!(!installation_complete(&dir, version));
-
-        let client = patched_client_path(&dir, version);
-        fs::create_dir_all(client.parent().unwrap()).unwrap();
-        fs::write(&client, b"patched").unwrap();
-        assert!(installation_complete(&dir, version));
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -492,8 +448,7 @@ mod tests {
 
     /// Full live pipeline: provisions a real Java 21 (runtime.rs) if none
     /// is already usable, then runs the real NeoForge 21.1.248 installer
-    /// into an empty game dir (it fetches and patches vanilla 1.21.1
-    /// itself — confirmed manually, no pre-seeding needed) and checks the
+    /// into a staging game dir with a verified vanilla 1.21.1 input and checks the
     /// installed profile merges into a launch-shaped spec together with a
     /// separately-fetched vanilla version JSON (mojang.rs), exactly as
     /// `lib.rs`'s `ensure_game_installed` command will do it. Not run by
@@ -518,8 +473,14 @@ mod tests {
         let java_install =
             java::ensure_java(&client, &root.join("runtime"), 21, &no_progress).unwrap();
 
-        // The installer fetches and patches vanilla itself; we don't
-        // pre-download it. It only needs a Java runtime and an empty dir.
+        // Verify vanilla before the installer is allowed to use it.
+        mojang::ensure_client_jar(
+            &client,
+            &game_dir,
+            &vanilla.id,
+            &vanilla.downloads.as_ref().unwrap().client,
+        )
+        .unwrap();
         let progress_calls: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
         let progress: ProgressCallback = {
             let progress_calls = Arc::clone(&progress_calls);
@@ -531,6 +492,7 @@ mod tests {
             &game_dir,
             &cache_dir,
             "21.1.248",
+            &vanilla,
             &progress,
         )
         .unwrap();
@@ -577,6 +539,7 @@ mod tests {
             &game_dir,
             &cache_dir,
             "21.1.248",
+            &vanilla,
             &no_progress,
         )
         .unwrap();

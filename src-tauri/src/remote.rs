@@ -4,6 +4,7 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use reqwest::header::ACCEPT_ENCODING;
 use reqwest::{blocking::Client, redirect::Policy};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fmt,
     io::{self, Read},
@@ -68,7 +69,16 @@ impl fmt::Display for RemoteError {
     }
 }
 
+pub struct VerifiedSnapshot {
+    pub manifest: Manifest,
+    pub digest: String,
+}
+
 pub fn fetch_manifest(profile_id: &str) -> Result<Manifest, RemoteError> {
+    Ok(fetch_snapshot(profile_id)?.manifest)
+}
+
+pub fn fetch_snapshot(profile_id: &str) -> Result<VerifiedSnapshot, RemoteError> {
     let url = match profile_id {
         "aeronautics" => AERONAUTICS_MANIFEST,
         _ => return Err(RemoteError::UnknownProfile),
@@ -90,7 +100,7 @@ pub fn fetch_manifest(profile_id: &str) -> Result<Manifest, RemoteError> {
             .expect("embedded public key must be 32 bytes"),
     )
     .expect("embedded public key must be valid");
-    verify_envelope(&source, profile_id, &public_key)
+    verify_snapshot(&source, profile_id, &public_key)
 }
 
 fn fetch_manifest_bytes(client: &Client, url: &str) -> Result<Vec<u8>, RemoteError> {
@@ -154,11 +164,20 @@ fn read_envelope(source: impl Read) -> Result<Vec<u8>, RemoteError> {
     Ok(bytes)
 }
 
+#[cfg(test)]
 fn verify_envelope(
     source: &[u8],
     profile_id: &str,
     public_key: &VerifyingKey,
 ) -> Result<Manifest, RemoteError> {
+    Ok(verify_snapshot(source, profile_id, public_key)?.manifest)
+}
+
+fn verify_snapshot(
+    source: &[u8],
+    profile_id: &str,
+    public_key: &VerifyingKey,
+) -> Result<VerifiedSnapshot, RemoteError> {
     if source.len() > MAX_ENVELOPE_BYTES {
         return Err(RemoteError::TooLarge);
     }
@@ -178,12 +197,13 @@ fn verify_envelope(
     public_key
         .verify_strict(&payload, &signature)
         .map_err(|_| RemoteError::InvalidSignature)?;
+    let digest = format!("{:x}", Sha256::digest(&payload));
     let payload = String::from_utf8(payload).map_err(|_| RemoteError::InvalidSignature)?;
     let manifest = manifest::validate_json(&payload).map_err(RemoteError::InvalidManifest)?;
     if manifest.id != profile_id {
         return Err(RemoteError::ProfileMismatch);
     }
-    Ok(manifest)
+    Ok(VerifiedSnapshot { manifest, digest })
 }
 
 #[cfg(test)]

@@ -47,6 +47,8 @@ pub struct LaunchRequest<'a> {
     pub identity: &'a PlayerIdentity,
     pub memory_mb: u16,
     pub log_path: &'a Path,
+    /// Short-lived onboarding grant; never persisted or placed in command-line arguments.
+    pub onboarding_token: Option<&'a str>,
 }
 
 fn classpath_separator() -> &'static str {
@@ -244,6 +246,12 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
         command.arg(substitute(&argument, &vars));
     }
     command.current_dir(request.profile_dir);
+    // Do not inherit a stale grant from the launcher process environment.
+    command.env_remove("SHACRAFT_ONBOARDING_TOKEN");
+    if let Some(token) = request.onboarding_token {
+        command.env("SHACRAFT_ONBOARDING_TOKEN", token);
+    }
+    command.stdin(Stdio::null());
 
     let log_file = fs::File::create(request.log_path)?;
     command.stdout(Stdio::from(log_file.try_clone()?));
