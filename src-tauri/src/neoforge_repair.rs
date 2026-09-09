@@ -494,7 +494,11 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let root = Stage::new(&std::env::temp_dir()).unwrap();
+            // macOS temporary directories may use the system /var -> /private/var
+            // alias. Canonicalize only this trusted fixture anchor; production
+            // safe_path must continue rejecting root/descendant substitutions.
+            let temporary_root = std::env::temp_dir().canonicalize().unwrap();
+            let root = Stage::new(&temporary_root).unwrap();
             let game = root.0.join("game");
             let cache = root.0.join("cache");
             let input = jar_bytes(b"verified vanilla");
