@@ -13,10 +13,12 @@ async fn account_task<T: Send + 'static>(
     work: impl FnOnce(&Path) -> Result<T, shacraft_account::AccountError> + Send + 'static,
 ) -> Result<T, String> {
     let directory = data_dir(app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, operations)?;
     let permit = operations
         .shacraft_account
         .acquire("ShaCraft account operation")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         work(&directory).map_err(|error| error.to_string())
     })

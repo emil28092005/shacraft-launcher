@@ -18,6 +18,7 @@ interface PlayDockProps {
   repairDisabled: boolean
   onPrimary: () => void
   onRepair: () => void
+  onLegacy: () => void
 }
 
 export function PlayDock(props: PlayDockProps) {
@@ -41,7 +42,9 @@ export function PlayDock(props: PlayDockProps) {
   } else {
     title = needsLogin ? 'Нужен вход ShaCraft' : props.needsLink ? 'Нужно привязать ник' : profile?.status === 'checking' ? 'Проверяем сборку'
       : profile?.inspection?.upToDate ? 'Сборка готова' : 'Требуется проверка'
-    detail = profile?.inspection ? `${profile.inspection.managedFiles} файлов под контролем` : 'Проверяем локальные файлы'
+    detail = profile?.inspection
+      ? `${profile.inspection.upToDate ? 'Проверено файлов сборки' : 'Файлов в сборке'}: ${profile.inspection.managedFiles}`
+      : 'Проверяем локальные файлы'
   }
 
   return (
@@ -58,7 +61,8 @@ export function PlayDock(props: PlayDockProps) {
         <span><Globe2 size={15} /> {server.version}</span>
         <span><Gauge size={15} /> {memoryGb} ГБ памяти</span>
       </div>
-      <button className="repair-button" onClick={props.onRepair} disabled={props.repairDisabled} aria-label="Проверить файлы"><RotateCcw size={19} /></button>
+      <button className="legacy-button" onClick={props.onLegacy} disabled={props.repairDisabled}>Разобрать моды</button>
+      <button className="repair-button" onClick={props.onRepair} disabled={props.repairDisabled} aria-label="Проверить сборку и восстановить игру" title="Проверить сборку и восстановить игру"><RotateCcw size={19} /></button>
       <button className="play-button" disabled={props.primaryDisabled} onClick={props.onPrimary}>
         <Play size={21} fill="currentColor" /><span>{props.label}</span>
       </button>

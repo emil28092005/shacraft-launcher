@@ -8,8 +8,8 @@ export const servers: readonly [Server, ...Server[]] = [
     kicker: 'Основная сборка',
     name: 'Aeronautics',
     subtitle: 'Строй корабли. Поднимай города в небо.',
-    version: '1.21.1 · NeoForge 21.1.248',
-    loader: 'NeoForge 21.1.248',
+    version: 'Версия уточняется',
+    loader: 'По подписанной сборке',
     profileId: 'aeronautics',
   },
 ]

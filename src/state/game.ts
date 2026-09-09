@@ -13,6 +13,7 @@ export interface GameState {
 export type GameAction =
   | { type: 'sync'; profileId: string }
   | { type: 'synced'; profileId: string }
+  | { type: 'repaired'; profileId: string }
   | { type: 'install'; profileId: string }
   | { type: 'progress'; progress: InstallProgressPayload }
   | { type: 'launch'; profileId: string }
@@ -37,7 +38,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'synced':
       return operation.phase === 'syncing' && operation.profileId === action.profileId
         ? initialGameState : state
+    case 'repaired':
+      return operation.phase === 'installing' && operation.profileId === action.profileId ? initialGameState : state
     case 'progress':
+      if (operation.phase === 'installing' && action.progress.stage === 'launch') return { ...state, operation: { phase: 'launching', profileId: operation.profileId } }
       return operation.phase === 'installing'
         ? { ...state, operation: { ...operation, progress: action.progress } } : state
     case 'launch':
@@ -45,10 +49,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         ? { ...state, operation: { phase: 'launching', profileId: action.profileId } } : state
     case 'started':
       // A fast-exiting child can emit game-exited before invoke resolves.
-      return operation.phase === 'launching' && operation.profileId === action.profileId
+      return (operation.phase === 'launching' || operation.phase === 'installing') && operation.profileId === action.profileId
         ? { ...state, operation: { phase: 'running', profileId: action.profileId } } : state
     case 'exited':
-      if ((operation.phase !== 'launching' && operation.phase !== 'running') ||
+      if ((operation.phase !== 'launching' && operation.phase !== 'running' && operation.phase !== 'installing') ||
           operation.profileId !== action.result.profileId) return state
       return {
         operation: { phase: 'idle' },
@@ -62,6 +66,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
 }
 
 export const installStageLabels: Record<InstallProgressPayload['stage'], string> = {
+  mods: 'Обновляем сборку',
+  launch: 'Запускаем игру',
   java: 'Готовим Java',
   neoforge: 'Устанавливаем NeoForge',
   libraries: 'Скачиваем библиотеки',

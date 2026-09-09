@@ -60,16 +60,26 @@ pub fn ensure_java(
     required_major: u8,
     on_progress: &ProgressCallback,
 ) -> Result<JavaInstallation, EnsureJavaError> {
-    if let Some(installation) = detect() {
-        if installation.major == required_major {
-            on_progress(1, 1);
-            return Ok(installation);
-        }
+    if let Some(installation) = find_matching(candidates(), required_major, check_candidate) {
+        on_progress(1, 1);
+        return Ok(installation);
     }
     let executable = runtime::ensure_runtime(client, runtime_root, required_major, on_progress)
         .map_err(EnsureJavaError::Provisioning)?;
     check_candidate(executable.clone())
+        .filter(|installation| installation.major == required_major)
         .ok_or(EnsureJavaError::ProvisionedButUnrecognised(executable))
+}
+
+fn find_matching(
+    candidates: impl IntoIterator<Item = PathBuf>,
+    required_major: u8,
+    mut inspect: impl FnMut(PathBuf) -> Option<JavaInstallation>,
+) -> Option<JavaInstallation> {
+    candidates
+        .into_iter()
+        .filter_map(&mut inspect)
+        .find(|installation| installation.major == required_major)
 }
 
 fn candidates() -> Vec<PathBuf> {
@@ -127,7 +137,48 @@ fn parse_major(version: &str) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_major, parse_version};
+    use super::*;
+
+    #[test]
+    fn matching_path_runtime_is_not_hidden_by_wrong_java_home() {
+        let candidates = ["JAVA_HOME", "PATH"].map(PathBuf::from);
+        let found = find_matching(candidates, 21, |path| {
+            let major = if path == Path::new("JAVA_HOME") {
+                17
+            } else {
+                21
+            };
+            Some(JavaInstallation {
+                executable: path.display().to_string(),
+                major,
+                version: major.to_string(),
+            })
+        })
+        .unwrap();
+        assert_eq!(found.executable, "PATH");
+    }
+
+    #[test]
+    fn matching_home_remains_preferred_and_unusable_candidates_are_skipped() {
+        let found = find_matching(["broken", "home", "path"].map(PathBuf::from), 21, |path| {
+            assert_ne!(path, Path::new("path"), "must stop at matching JAVA_HOME");
+            (path != Path::new("broken")).then(|| JavaInstallation {
+                executable: path.display().to_string(),
+                major: 21,
+                version: "21".into(),
+            })
+        })
+        .unwrap();
+        assert_eq!(found.executable, "home");
+        assert!(find_matching([PathBuf::from("newer")], 21, |path| Some(
+            JavaInstallation {
+                executable: path.display().to_string(),
+                major: 25,
+                version: "25".into()
+            }
+        ))
+        .is_none());
+    }
 
     #[test]
     fn parses_modern_java_version() {

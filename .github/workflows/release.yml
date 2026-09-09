@@ -1,0 +1,190 @@
+name: Prepare signed release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version matching all source versions (e.g. 0.2.0)
+        required: true
+        type: string
+      tag:
+        description: Existing tag on protected main (e.g. v0.2.0)
+        required: true
+        type: string
+      notes:
+        description: Release notes (maximum 4096 UTF-8 bytes)
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: launcher-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.repository == 'emil28092005/shacraft-launcher' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    outputs:
+      environment: ${{ steps.gate.outputs.environment }}
+      commit: ${{ steps.source.outputs.commit }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate inputs before resolving tag
+        run: python -c "import os,sys; sys.path.insert(0,'scripts'); import release; release.version_tag(os.environ['RELEASE_VERSION'],os.environ['RELEASE_TAG'])"
+      - name: Require an existing protected environment before any job references it
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_github.py gate launcher-release
+      - name: Resolve tag using trusted workflow Git commands
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_COMMIT=$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")
+          git merge-base --is-ancestor "$RELEASE_COMMIT" refs/remotes/origin/main
+          printf 'commit=%s\n' "$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check source versions, existing tag and main ancestry
+        run: python scripts/release.py preflight --version "$RELEASE_VERSION" --tag "$RELEASE_TAG" --check-git
+
+  build:
+    needs: preflight
+    environment: ${{ needs.preflight.outputs.environment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+          - platform: windows-x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - platform: darwin-aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+            bundles: dmg,app
+          - platform: darwin-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: dmg,app
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      SHACRAFT_UPDATER_PUBLIC_KEY: ${{ vars.SHACRAFT_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - run: npm test
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: cargo build --locked --release --manifest-path scripts/release-verifier/Cargo.toml
+      - run: python -m unittest discover -s scripts -p 'release_test.py' -v
+      - name: Fail closed on missing, wrong or unpinned signing credentials
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python scripts/release.py preflight --version "$RELEASE_VERSION" --tag "$RELEASE_TAG" --check-git --signing --config "$RUNNER_TEMP/updater-build.json"
+      - name: Build all platform packages with updater signatures
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri:build -- --ci --target '${{ matrix.target }}' --bundles '${{ matrix.bundles }}' --config "$RUNNER_TEMP/updater-build.json"
+      - name: Collect packages, sign manual packages, verify all signatures
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python scripts/release.py collect --bundle 'src-tauri/target/${{ matrix.target }}/release/bundle' --directory release-packages --platform '${{ matrix.platform }}' --version "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 7
+          path: release-packages/*
+
+  draft:
+    needs: [preflight, build]
+    environment: ${{ needs.preflight.outputs.environment }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+      SHACRAFT_UPDATER_PUBLIC_KEY: ${{ vars.SHACRAFT_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: cargo build --locked --release --manifest-path scripts/release-verifier/Cargo.toml
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-packages
+      - name: Generate signed metadata, validate complete set, upload and re-verify DRAFT
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          python scripts/release.py preflight --version "$RELEASE_VERSION" --tag "$RELEASE_TAG" --check-git --signing
+          RELEASE_DATE=$(git show -s --format=%cI HEAD)
+          RELEASE_DATE=$(python -c "from datetime import datetime,timezone; import sys; print(datetime.fromisoformat(sys.argv[1]).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$RELEASE_DATE")
+          python scripts/release.py metadata --directory release-packages --version "$RELEASE_VERSION" --tag "$RELEASE_TAG" --date "$RELEASE_DATE" --notes "$RELEASE_NOTES"
+          python scripts/release_github.py draft --directory release-packages --version "$RELEASE_VERSION" --tag "$RELEASE_TAG"

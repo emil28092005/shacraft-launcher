@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { LegacyModsDialog } from './components/LegacyModsDialog'
 import { Library } from './components/Library'
 import { RecoveryCodesModal } from './components/RecoveryCodesModal'
 import { PlayDock } from './components/PlayDock'
@@ -10,6 +11,7 @@ import { useAccount } from './hooks/useAccount'
 import { useLauncher } from './hooks/useLauncher'
 import { useServerStatus } from './hooks/useServerStatus'
 import { useSettings } from './hooks/useSettings'
+import { useUpdater } from './hooks/useUpdater'
 import { isNative } from './services/native'
 import { launchAccess } from './state/account'
 import { installStageLabels } from './state/game'
@@ -17,6 +19,7 @@ import { installStageLabels } from './state/game'
 export function App() {
   const [selected, setSelected] = useState(servers[0])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [legacyOpen, setLegacyOpen] = useState(false)
   const [windowError, setWindowError] = useState<string | null>(null)
   const preferences = useSettings()
   const session = useAccount()
@@ -25,19 +28,32 @@ export function App() {
   const closeSettings = useCallback(() => setSettingsOpen(false), [])
   const desktop = isNative()
   const profile = launcher.profiles[selected.profileId]
+  const metadata = launcher.metadata[selected.profileId]
+  const displayed = { ...selected, version: metadata ? `Minecraft ${metadata.minecraftVersion}` : 'Версия уточняется',
+    loader: metadata ? `${metadata.loaderKind} ${metadata.loaderVersion}` : 'По подписанной сборке' }
   const ready = profile?.inspection?.upToDate === true
   const operation = launcher.game.operation
   const busy = operation.phase !== 'idle'
   const access = launchAccess(session.account)
   const checking = desktop && (!profile || profile.status === 'checking')
   const settingsBlocked = !preferences.loaded || preferences.saving || !!preferences.error
-  const disabled = !desktop || busy || session.busy || access === 'loading' ||
+  const updaterBlocked = busy ? 'Завершите игру или дождитесь окончания работы со сборкой.'
+    : settingsBlocked ? 'Дождитесь сохранения настроек; при ошибке повторите сохранение.'
+      : session.busy || access === 'loading' ? 'Дождитесь завершения работы с аккаунтом.'
+        : session.linking ? 'Завершите подтверждение игрового ника перед обновлением лаунчера.'
+          : session.recoveryCodes.length ? 'Сначала сохраните коды восстановления аккаунта.'
+            : legacyOpen ? 'Закройте проверку старых модов перед обновлением лаунчера.' : null
+  const updater = useUpdater(updaterBlocked)
+  const updaterRecovery = updater.state.status?.phase === 'error' && !updater.state.status.canRetry
+  const updateLocked = updater.mutating || updater.state.status?.phase === 'ready' || updaterRecovery
+  const disabled = !desktop || busy || updateLocked || session.busy || access === 'loading' ||
     (access === 'ready' && (checking || settingsBlocked || !launcher.eventsReady))
-  const repairDisabled = !desktop || busy || checking
+  const repairDisabled = !desktop || busy || updateLocked || checking
   const error = launcher.game.error ?? preferences.error ?? windowError ?? launcher.environmentError ?? session.error ?? profile?.error ?? null
 
   let label = 'Играть'
   if (!desktop) label = 'В приложении'
+  else if (updateLocked) label = updaterRecovery ? 'Нужно восстановить лаунчер' : 'Обновление лаунчера'
   else if (operation.phase === 'running') label = 'Игра запущена'
   else if (operation.phase === 'launching') label = 'Запускаем…'
   else if (operation.phase === 'installing') label = operation.progress ? `${installStageLabels[operation.progress.stage]}…` : 'Подготовка…'
@@ -50,6 +66,11 @@ export function App() {
   else if (checking) label = 'Проверяем…'
   else if (!ready) label = 'Проверить'
 
+  const onboard = async (nickname: string) => {
+    if (busy || updateLocked || settingsBlocked || !launcher.eventsReady) return
+    const result = await launcher.onboard(selected.profileId, nickname)
+    if (result?.onboarding) session.acceptChallenge(result.onboarding)
+  }
   const primary = () => {
     if (disabled) return
     if (access !== 'ready') setSettingsOpen(true)
@@ -59,19 +80,27 @@ export function App() {
   return (
     <div className="app-shell">
       <Titlebar host={launcher.host} onError={setWindowError} />
-      <div className="workspace" inert={session.recoveryCodes.length > 0}>
+      <div className="workspace" inert={session.recoveryCodes.length > 0 || legacyOpen}>
         <Library selected={selected} profiles={launcher.profiles} account={session.account}
-          native={desktop} locked={busy || session.busy} onSelect={setSelected} onSettings={() => setSettingsOpen(true)} />
-        <ServerStage server={selected} status={serverStatus}>
-          <PlayDock server={selected} operation={operation} profile={profile}
+          native={desktop} locked={busy || updateLocked || session.busy} onSelect={setSelected} onSettings={() => setSettingsOpen(true)} />
+        <ServerStage server={displayed} status={serverStatus} javaMajor={metadata?.javaMajor}>
+          {(updater.state.status?.phase === 'available' || (updater.state.status?.phase === 'manual' && updater.state.status.availableVersion) || updater.state.status?.phase === 'ready' || updater.mutating || updaterRecovery) &&
+            <button className="launcher-update-notice" onClick={() => setSettingsOpen(true)}>
+              {updaterRecovery ? 'Нужно восстановить лаунчер' : updater.state.status?.phase === 'ready' ? 'Перезапустите лаунчер после обновления'
+                : updater.mutating ? 'Обновление лаунчера…' : `Доступен лаунчер ${updater.state.status?.availableVersion ?? ''}`}
+              <span>Открыть настройки</span>
+            </button>}
+          <PlayDock server={displayed} operation={operation} profile={profile}
             memoryGb={preferences.settings.memoryMb / 1024} native={desktop}
             needsLogin={access === 'login'} needsLink={access === 'link'}
             error={error} label={label} primaryDisabled={disabled} repairDisabled={repairDisabled}
-            onPrimary={primary} onRepair={() => { if (!repairDisabled) void launcher.repair(selected.profileId) }} />
+            onLegacy={() => setLegacyOpen(true)} onPrimary={primary} onRepair={() => { if (!repairDisabled) void launcher.repair(selected.profileId) }} />
         </ServerStage>
       </div>
-      <SettingsDrawer open={settingsOpen && !session.recoveryCodes.length} locked={busy} preferences={preferences}
-        session={session} host={launcher.host} java={launcher.java} onClose={closeSettings} />
+      <SettingsDrawer open={settingsOpen && !session.recoveryCodes.length} locked={busy || updateLocked} preferences={preferences}
+        updater={updater} native={desktop}
+        session={session} host={launcher.host} java={launcher.java} requiredJava={metadata?.javaMajor} onOnboard={onboard} onClose={closeSettings} />
+      {legacyOpen && <LegacyModsDialog profileId={selected.profileId} onClose={() => setLegacyOpen(false)} onChanged={() => { void launcher.refreshProfile(selected.profileId) }} />}
       <RecoveryCodesModal codes={session.recoveryCodes} onAcknowledge={session.acknowledgeRecoveryCodes} />
     </div>
   )

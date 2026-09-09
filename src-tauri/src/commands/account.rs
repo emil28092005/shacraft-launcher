@@ -30,8 +30,10 @@ pub(crate) fn start_microsoft_login(
     state: State<'_, LauncherOperations>,
 ) -> Result<(), String> {
     let directory = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&directory, &state)?;
     let permit = state.account.acquire("Account operation")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         let login = || -> Result<msa::MinecraftProfile, String> {
             let client = msa::http_client().map_err(|error| error.to_string())?;
@@ -76,8 +78,10 @@ pub(crate) async fn get_account(
     state: State<'_, LauncherOperations>,
 ) -> Result<Option<msa::MinecraftProfile>, String> {
     let data_dir = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&data_dir, &state)?;
     let permit = state.account.acquire("Account operation")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         let Some(refresh_token) = msa::load_refresh_token(&data_dir) else {
             return Ok(None);
@@ -102,8 +106,10 @@ pub(crate) async fn logout(
     state: State<'_, LauncherOperations>,
 ) -> Result<(), String> {
     let data_dir = data_dir(&app)?;
+    let lifecycle = crate::update_guard::begin_operation(&data_dir, &state)?;
     let permit = state.account.acquire("Account operation")?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = lifecycle;
         let _permit = permit;
         msa::clear_account(&data_dir)
     })

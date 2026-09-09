@@ -2,10 +2,11 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { createSerialQueue, createSubscription, singleFlight } from './async'
+import type { UpdaterStatus } from '../types/updater'
 import type {
   GameExitedPayload, InstallProgressPayload, JavaInstallation, LauncherSettings,
   LinkChallenge, LinkStatus, NativeHost, ProfileInspection, ServerStatus,
-  ShaCraftAccount, ShaCraftLoginResult, SyncResult,
+  ShaCraftAccount, ShaCraftLoginResult, SyncResult, ProfileMetadata, PreparationResult, LegacyMod, LegacySelection, LegacyBackup,
 } from '../types/launcher'
 
 export const isNative = () => typeof window !== 'undefined' && isTauri()
@@ -15,7 +16,15 @@ const restoreAccount = singleFlight(() => accountRequests.enqueue(() => invoke<S
 // Keep the IPC contract in one place. UI components never invoke native
 // commands directly and cannot pass arbitrary URLs or filesystem paths.
 export const native = {
+  updaterStatus: () => invoke<UpdaterStatus>('updater_status'),
+  checkUpdater: () => invoke<UpdaterStatus>('updater_check'),
+  installUpdater: () => invoke<UpdaterStatus>('updater_download_install'),
+  restartUpdater: () => invoke<void>('updater_restart'),
+  openUpdaterRelease: () => invoke<void>('updater_open_release_page'),
   host: () => invoke<NativeHost>('native_host'),
+  metadata: (profileId: string) => invoke<ProfileMetadata>('profile_metadata', { profileId }),
+  legacyMods: (profileId: string) => invoke<LegacyMod[]>('legacy_mods', { profileId }),
+  backupLegacyMods: (profileId: string, selections: LegacySelection[]) => invoke<LegacyBackup>('backup_legacy_mods', { profileId, selections }),
   loadSettings: () => invoke<LauncherSettings>('load_settings'),
   saveSettings: (settings: LauncherSettings) => invoke<LauncherSettings>('save_settings', { settings }),
   detectJava: () => invoke<JavaInstallation | null>('detect_java'),
@@ -28,8 +37,15 @@ export const native = {
   startLink: (nickname: string) => accountRequests.enqueue(() => invoke<LinkChallenge>('shacraft_start_link', { nickname })),
   linkStatus: (challengeId: number) => accountRequests.enqueue(() => invoke<LinkStatus>('shacraft_link_status', { challengeId })),
   serverStatus: (profileId: string) => invoke<ServerStatus>('get_server_status', { profileId }),
-  installGame: (profileId: string) => invoke<void>('ensure_game_installed', { profileId }),
-  launchGame: (profileId: string) => invoke<void>('launch_game', { profileId }),
+  installGame: (profileId: string) => invoke<PreparationResult>('ensure_game_installed', { profileId }),
+  launchGame: (profileId: string) => invoke<PreparationResult>('launch_game', { profileId }),
+  launchOnboarding: (profileId: string, nickname: string) => invoke<PreparationResult>('launch_onboarding', { profileId, nickname }),
+}
+
+export function watchUpdater(receive: (status: UpdaterStatus) => void) {
+  return createSubscription([
+    listen<UpdaterStatus>('launcher-update-status', ({ payload }) => receive(payload)),
+  ])
 }
 
 export const windowControls = {

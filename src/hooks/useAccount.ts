@@ -3,7 +3,7 @@ import { createRequestScope, errorMessage } from '../services/async'
 import { isNative, native } from '../services/native'
 import { linkedNickname, validCredentials } from '../state/account'
 import { isValidNickname } from '../state/settings'
-import type { ShaCraftAccount } from '../types/launcher'
+import type { ShaCraftAccount, LinkChallenge } from '../types/launcher'
 
 interface PendingLink {
   challengeId: number
@@ -125,6 +125,14 @@ export function useAccount() {
     }
   }
 
+  const acceptChallenge = (started: LinkChallenge) => {
+    requests.current.invalidate()
+    const current = requests.current.capture()
+    setLinkMessage(`${started.registered_on_server ? 'Войдите на Aeronautics: /login <пароль>.' : 'Войдите на Aeronautics: /register <пароль> <пароль>.'} Затем подтвердите свой аккаунт командой /shacraft link ${started.challenge_id} ${started.proof_code}`)
+    setChallenge({ challengeId: started.challenge_id,
+      expiresAt: Date.now() + started.expires_in_seconds * 1000, isCurrent: current })
+  }
+
   const startLink = async (nickname: string) => {
     if (!isNative() || pending.current || challenge || !account) return
     if (!isValidNickname(nickname)) {
@@ -139,11 +147,7 @@ export function useAccount() {
     try {
       const started = await native.startLink(nickname)
       if (!currentRequest()) return
-      setLinkMessage(started.registered_on_server
-        ? 'Зайдите на Aeronautics с этим ником и выполните /login.'
-        : 'Зайдите на Aeronautics с этим ником и выполните /register.')
-      setChallenge({ challengeId: started.challenge_id,
-        expiresAt: Date.now() + started.expires_in_seconds * 1000, isCurrent: currentRequest })
+      acceptChallenge(started)
     } catch (reason) {
       setLinkMessage(errorMessage(reason, 'Не удалось начать привязку'))
     } finally {
@@ -154,7 +158,7 @@ export function useAccount() {
 
   return {
     account, error, busy, recoveryCodes, linkMessage, linking: challenge !== null,
-    linkedNickname: linkedNickname(account), authenticate, logout, startLink,
+    linkedNickname: linkedNickname(account), authenticate, logout, startLink, acceptChallenge,
     clearError: () => setError(null),
     acknowledgeRecoveryCodes: () => setRecoveryCodes([]),
   }

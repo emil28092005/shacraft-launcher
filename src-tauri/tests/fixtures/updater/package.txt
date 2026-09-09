@@ -1,0 +1,2 @@
+ShaCraft synthetic fixture; never execute or install.
+shacraft-launcher_0.3.0_linux-x86_64.AppImage

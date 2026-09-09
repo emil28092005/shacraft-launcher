@@ -4,7 +4,7 @@ import { errorMessage } from '../services/async'
 import { isNative, native, watchGame } from '../services/native'
 import { gameReducer, initialGameState } from '../state/game'
 import { profilesReducer } from '../state/profiles'
-import type { JavaInstallation, NativeHost } from '../types/launcher'
+import type { JavaInstallation, NativeHost, ProfileMetadata, PreparationResult } from '../types/launcher'
 
 export function useLauncher() {
   const [host, setHost] = useState<NativeHost | null>(null)
@@ -14,6 +14,7 @@ export function useLauncher() {
   const [game, dispatch] = useReducer(gameReducer, initialGameState)
   const [eventsReady, setEventsReady] = useState(false)
   const busy = useRef(false)
+  const [metadata, setMetadata] = useState<Record<string, ProfileMetadata>>({})
 
   useEffect(() => {
     if (!isNative()) return
@@ -41,6 +42,9 @@ export function useLauncher() {
     })
     for (const server of servers) {
       const profileId = server.profileId
+      void native.metadata(profileId).then((value) => {
+        if (active) setMetadata((old) => ({ ...old, [profileId]: value }))
+      }).catch(() => { /* Missing verified metadata is shown as unknown. */ })
       updateProfile({ type: 'check', profileId })
       void native.inspectProfile(profileId).then((inspection) => {
         if (active) updateProfile({ type: 'checked', profileId, inspection })
@@ -51,56 +55,38 @@ export function useLauncher() {
     return () => { active = false; subscription.dispose() }
   }, [])
 
-  const repair = async (profileId: string) => {
-    if (!isNative() || busy.current || game.operation.phase !== 'idle' || profiles[profileId]?.status === 'checking') return
+  const prepare = async (profileId: string, mode: 'repair' | 'play' | 'onboarding', nickname?: string): Promise<PreparationResult | null> => {
+    if (!isNative() || !eventsReady || busy.current || game.operation.phase !== 'idle') return null
     busy.current = true
-    dispatch({ type: 'sync', profileId })
-    // A repair may replace only some files before failing. Never keep an older
-    // up-to-date inspection as permission to launch that partial installation.
+    dispatch({ type: 'install', profileId })
     updateProfile({ type: 'check', profileId })
     try {
-      const result = await native.syncProfile(profileId)
-      updateProfile({ type: 'checked', profileId,
-        inspection: { root: result.root, managedFiles: result.downloadedFiles + result.reusedFiles,
-          missingFiles: 0, mismatchedFiles: 0, upToDate: true },
-      })
-      dispatch({ type: 'synced', profileId })
+      // The native command owns one snapshot and one lock across every stage.
+      const result = mode === 'repair' ? await native.installGame(profileId)
+        : mode === 'onboarding' ? await native.launchOnboarding(profileId, nickname ?? '')
+          : await native.launchGame(profileId)
+      updateProfile({ type: 'checked', profileId, inspection: result.inspection })
+      setMetadata((old) => ({ ...old, [profileId]: result.metadata }))
+      if (mode === 'repair') dispatch({ type: 'repaired', profileId })
+      else dispatch({ type: 'started', profileId })
+      return result
     } catch (reason) {
-      const error = errorMessage(reason, 'Не удалось синхронизировать сборку')
+      const error = errorMessage(reason, mode === 'repair' ? 'Не удалось восстановить игру' : 'Не удалось запустить игру')
       updateProfile({ type: 'failed', profileId, error })
       dispatch({ type: 'failed', error })
-    } finally {
-      busy.current = false
-    }
+      return null
+    } finally { busy.current = false }
   }
 
-  const launch = async (profileId: string) => {
-    if (!isNative() || !eventsReady || busy.current || game.operation.phase !== 'idle') return
-    busy.current = true
-    dispatch({ type: 'sync', profileId })
+  const refreshProfile = async (profileId: string) => {
     updateProfile({ type: 'check', profileId })
-    try {
-      // Reconcile the current signed modpack before every Play, even when a
-      // previous inspection succeeded. Game installation alone omits mods.
-      const synced = await native.syncProfile(profileId)
-      updateProfile({ type: 'checked', profileId, inspection: {
-        root: synced.root, managedFiles: synced.downloadedFiles + synced.reusedFiles,
-        missingFiles: 0, mismatchedFiles: 0, upToDate: true,
-      } })
-      dispatch({ type: 'synced', profileId })
-      dispatch({ type: 'install', profileId })
-      await native.installGame(profileId)
-      dispatch({ type: 'launch', profileId })
-      await native.launchGame(profileId)
-      dispatch({ type: 'started', profileId })
-    } catch (reason) {
-      const error = errorMessage(reason, 'Не удалось запустить игру')
-      updateProfile({ type: 'failed', profileId, error })
-      dispatch({ type: 'failed', error })
-    } finally {
-      busy.current = false
-    }
+    try { updateProfile({ type: 'checked', profileId, inspection: await native.inspectProfile(profileId) }) }
+    catch (reason) { updateProfile({ type: 'failed', profileId, error: errorMessage(reason, 'Не удалось проверить сборку') }) }
   }
 
-  return { host, java, environmentError, profiles, game, eventsReady, repair, launch }
+  return { host, java, environmentError, profiles, metadata, game, eventsReady, refreshProfile,
+    repair: (profileId: string) => prepare(profileId, 'repair'),
+    launch: (profileId: string) => prepare(profileId, 'play'),
+    onboard: (profileId: string, nickname: string) => prepare(profileId, 'onboarding', nickname),
+  }
 }
