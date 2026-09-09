@@ -17,7 +17,10 @@
   approval и живой OAuth-тест. Текущий запуск использует ShaCraft identity.
 - [ ] Cold install / repair / update / game exit на чистых Windows/Linux/macOS.
   Unit tests и web preview не заменяют эти прогоны.
-- [ ] Подписанные installer-релизы и подписанное автообновление лаунчера.
+- [x] Native самообновление, русский UX, pinned updater key и защищённый release pipeline.
+- [ ] Настроить защищённое GitHub environment/production secrets, опубликовать первый
+  updater-релиз и проверить реальную замену приложения на каждой ОС. Подпись ОС и
+  Apple notarization — отдельные настройки; CI test keys не предназначены игрокам.
 - [ ] Реальная отмена загрузок, журнал с редактированием токенов и retry UX.
 - [ ] Выбор каталога профиля и безопасный reset только managed-файлов.
 - [ ] Keychain-хранилище сессии ShaCraft; OS-lock и lease игры уже реализованы.

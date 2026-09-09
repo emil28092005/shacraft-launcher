@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux desktop dependencies
         run: |
@@ -30,3 +33,5 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: cargo build --locked --release --manifest-path scripts/release-verifier/Cargo.toml
+      - run: python -m unittest discover -s scripts -p 'release_test.py' -v

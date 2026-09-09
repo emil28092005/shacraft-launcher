@@ -10,3 +10,5 @@ src-tauri/gen/
 *.p12
 *.pfx
 *.sig
+
+__pycache__/

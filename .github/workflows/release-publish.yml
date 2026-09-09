@@ -1,0 +1,95 @@
+name: Publish verified release (operator only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the complete signed draft
+        required: true
+        type: string
+      tag:
+        description: Existing draft tag (vVERSION)
+        required: true
+        type: string
+      confirmation:
+        description: Type publish vVERSION to confirm public publication
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: launcher-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.repository == 'emil28092005/shacraft-launcher' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    outputs:
+      environment: ${{ steps.gate.outputs.environment }}
+      commit: ${{ steps.source.outputs.commit }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate publication inputs
+        run: python -c "import os,sys; sys.path.insert(0,'scripts'); import release; release.version_tag(os.environ['RELEASE_VERSION'],os.environ['RELEASE_TAG']); release.require(os.environ['CONFIRMATION']=='publish '+os.environ['RELEASE_TAG'],'publication confirmation mismatch')"
+      - name: Require existing independent approval and protected-branch policy
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_github.py gate launcher-release-publish
+      - name: Resolve tag using trusted workflow Git commands
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_COMMIT=$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")
+          git merge-base --is-ancestor "$RELEASE_COMMIT" refs/remotes/origin/main
+          printf 'commit=%s\n' "$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check source versions after immutable source validation
+        run: python scripts/release.py preflight --version "$RELEASE_VERSION" --tag "$RELEASE_TAG" --check-git
+
+  publish:
+    needs: preflight
+    environment: ${{ needs.preflight.outputs.environment }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      SHACRAFT_UPDATER_PUBLIC_KEY: ${{ vars.SHACRAFT_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --locked --release --manifest-path scripts/release-verifier/Cargo.toml
+      - name: Re-download, verify signatures/metadata/assets and explicitly publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_github.py publish --version "$RELEASE_VERSION" --tag "$RELEASE_TAG" --confirmation "$CONFIRMATION"
