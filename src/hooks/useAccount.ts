@@ -1,15 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Feedback } from '../components/FeedbackDialog'
 import { createRequestScope, errorMessage } from '../services/async'
 import { isNative, native } from '../services/native'
 import { linkedNickname, validCredentials } from '../state/account'
 import { isValidNickname } from '../state/settings'
 import type { ShaCraftAccount } from '../types/launcher'
-
-interface PendingLink {
-  challengeId: number
-  expiresAt: number
-  isCurrent: () => boolean
-}
 
 export function useAccount() {
   // undefined = restoring saved account; null = signed out.
@@ -17,8 +12,12 @@ export function useAccount() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
-  const [challenge, setChallenge] = useState<PendingLink | null>(null)
   const [linkMessage, setLinkMessage] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const reportLink = useCallback((message: string, kind: Feedback['kind'] = 'info') => {
+    setLinkMessage(message)
+    setFeedback({ kind, title: kind === 'error' ? 'Не удалось привязать ник' : 'Привязка игрового ника', message })
+  }, [])
   const pending = useRef(false)
   const requests = useRef(createRequestScope())
 
@@ -34,44 +33,6 @@ export function useAccount() {
     })
     return () => { active = false; requests.current.invalidate() }
   }, [])
-
-  useEffect(() => {
-    if (!challenge) return
-    let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const current = () => active && challenge.isCurrent()
-    const poll = async () => {
-      if (!current()) return
-      if (Date.now() >= challenge.expiresAt) {
-        setChallenge(null)
-        setLinkMessage('Срок проверки истёк. Начните привязку ещё раз.')
-        return
-      }
-      try {
-        const result = await native.linkStatus(challenge.challengeId)
-        if (!current()) return
-        if (result.status === 'verified') {
-          const refreshed = await native.getAccount()
-          if (!current()) return
-          setAccount(refreshed)
-          setChallenge(null)
-          setLinkMessage(linkedNickname(refreshed) ? 'Ник подтверждён.' : 'Не удалось подтвердить привязку. Войдите снова.')
-        } else if (result.status === 'expired' || result.status === 'conflict') {
-          setChallenge(null)
-          setLinkMessage(result.detail || 'Проверка завершилась. Попробуйте ещё раз.')
-        } else {
-          // One request at a time; dispose and logout cancel future polling.
-          timer = setTimeout(() => { void poll() }, 3_000)
-        }
-      } catch (reason) {
-        if (!current()) return
-        setChallenge(null)
-        setLinkMessage(errorMessage(reason, 'Не удалось проверить ник'))
-      }
-    }
-    timer = setTimeout(() => { void poll() }, 3_000)
-    return () => { active = false; clearTimeout(timer) }
-  }, [challenge])
 
   const authenticate = async (username: string, password: string, register: boolean) => {
     if (pending.current || account === undefined) return false
@@ -92,7 +53,6 @@ export function useAccount() {
       const result = await native.authenticate(username, password, register)
       if (!currentRequest()) return false
       setAccount(result.account)
-      setChallenge(null)
       setLinkMessage(null)
       setRecoveryCodes(result.recoveryCodes)
       return true
@@ -109,7 +69,6 @@ export function useAccount() {
     if (!isNative() || pending.current) return
     pending.current = true
     requests.current.invalidate()
-    setChallenge(null)
     setLinkMessage(null)
     setBusy(true)
     setError(null)
@@ -126,26 +85,42 @@ export function useAccount() {
   }
 
   const startLink = async (nickname: string) => {
-    if (!isNative() || pending.current || challenge || !account) return
+    if (pending.current) return
+    if (!isNative()) {
+      reportLink('Привязка доступна в приложении лаунчера.', 'error')
+      return
+    }
+    if (!account) {
+      reportLink('Войдите в аккаунт ShaCraft, затем повторите привязку.', 'error')
+      return
+    }
+    nickname = nickname.trim()
     if (!isValidNickname(nickname)) {
-      setLinkMessage('Ник: 3–16 латинских букв, цифр или _')
+      reportLink('Ник: 3–16 латинских букв, цифр или _', 'error')
       return
     }
     pending.current = true
     setBusy(true)
-    setLinkMessage('Создаём проверку…')
+    setError(null)
+    reportLink('Проверяем аккаунт и закрепляем ник…')
     requests.current.invalidate()
     const currentRequest = requests.current.capture()
     try {
-      const started = await native.startLink(nickname)
+      const refreshed = await native.getAccount()
       if (!currentRequest()) return
-      setLinkMessage(started.registered_on_server
-        ? 'Зайдите на Aeronautics с этим ником и выполните /login.'
-        : 'Зайдите на Aeronautics с этим ником и выполните /register.')
-      setChallenge({ challengeId: started.challenge_id,
-        expiresAt: Date.now() + started.expires_in_seconds * 1000, isCurrent: currentRequest })
+      setAccount(refreshed)
+      if (!refreshed) {
+        reportLink('Сессия завершена или аккаунт удалён. Войдите в ShaCraft снова; если аккаунт удалён, создайте новый.', 'error')
+        return
+      }
+      const linkedAccount = await native.claimNickname(nickname)
+      if (!currentRequest()) return
+      setAccount(linkedAccount)
+      const confirmed = linkedNickname(linkedAccount)
+      reportLink(confirmed ? `Ник ${confirmed} закреплён за аккаунтом. Теперь можно запускать игру.`
+        : 'Не удалось получить закреплённый ник. Войдите снова.', confirmed ? 'success' : 'error')
     } catch (reason) {
-      setLinkMessage(errorMessage(reason, 'Не удалось начать привязку'))
+      if (currentRequest()) reportLink(errorMessage(reason, 'Не удалось начать привязку'), 'error')
     } finally {
       pending.current = false
       setBusy(false)
@@ -153,7 +128,8 @@ export function useAccount() {
   }
 
   return {
-    account, error, busy, recoveryCodes, linkMessage, linking: challenge !== null,
+    account, error, busy, recoveryCodes, linkMessage, linking: false,
+    feedback, dismissFeedback: () => setFeedback(null),
     linkedNickname: linkedNickname(account), authenticate, logout, startLink,
     clearError: () => setError(null),
     acknowledgeRecoveryCodes: () => setRecoveryCodes([]),

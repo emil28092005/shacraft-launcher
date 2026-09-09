@@ -166,6 +166,14 @@ button:disabled { cursor: default; }
 .login-code { font-family: 'Unbounded'; font-size: 28px; letter-spacing: .08em; color: var(--green); background: #191f1a; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
 .login-url { color: var(--ice) !important; font-size: 11px !important; word-break: break-all; }
 
+.feedback-dialog { width: min(440px, calc(100vw - 40px)); max-height: calc(100vh - 80px); overflow-y: auto; padding: 28px; margin: auto; color: #e9eee9; background: #151d17; border: 1px solid #456348; border-radius: 16px; box-shadow: 0 24px 90px #0009; }
+.feedback-dialog::backdrop { background: #050a07b8; }
+.feedback-dialog.error { border-color: #a46c54; }
+.feedback-dialog h2 { margin: 0 0 14px; font-size: 19px; }
+.feedback-dialog p { margin: 0 0 24px; color: #c1cbc2; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.feedback-dialog button { width: 100%; padding: 12px; border: 0; border-radius: 9px; background: var(--green); color: #102112; font: inherit; font-weight: 650; cursor: pointer; }
+.feedback-dialog button:focus-visible { outline: 2px solid #e5ffe8; outline-offset: 4px; }
+
 @media (max-width: 1160px) {
   .workspace { grid-template-columns: 58px 224px 1fr; }
   .brand { width: 240px; }

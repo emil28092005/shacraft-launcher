@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { FeedbackDialog, type Feedback } from './components/FeedbackDialog'
 import { Library } from './components/Library'
 import { RecoveryCodesModal } from './components/RecoveryCodesModal'
 import { PlayDock } from './components/PlayDock'
@@ -18,6 +19,7 @@ export function App() {
   const [selected, setSelected] = useState(servers[0])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [windowError, setWindowError] = useState<string | null>(null)
+  const [errorFeedback, setErrorFeedback] = useState<Feedback | null>(null)
   const preferences = useSettings()
   const session = useAccount()
   const launcher = useLauncher()
@@ -35,6 +37,9 @@ export function App() {
     (access === 'ready' && (checking || settingsBlocked || !launcher.eventsReady))
   const repairDisabled = !desktop || busy || checking
   const error = launcher.game.error ?? preferences.error ?? windowError ?? launcher.environmentError ?? session.error ?? profile?.error ?? null
+  useEffect(() => {
+    if (error) setErrorFeedback({ kind: 'error', title: 'Ошибка лаунчера', message: error })
+  }, [error])
 
   let label = 'Играть'
   if (!desktop) label = 'В приложении'
@@ -73,6 +78,8 @@ export function App() {
       <SettingsDrawer open={settingsOpen && !session.recoveryCodes.length} locked={busy} preferences={preferences}
         session={session} host={launcher.host} java={launcher.java} onClose={closeSettings} />
       <RecoveryCodesModal codes={session.recoveryCodes} onAcknowledge={session.acknowledgeRecoveryCodes} />
+      <FeedbackDialog feedback={session.recoveryCodes.length ? null : session.feedback ?? errorFeedback}
+        onDismiss={() => { session.dismissFeedback(); setErrorFeedback(null) }} />
     </div>
   )
 }

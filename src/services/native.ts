@@ -26,6 +26,7 @@ export const native = {
     accountRequests.enqueue(() => invoke<ShaCraftLoginResult>('shacraft_authenticate', { username, password, register })),
   logout: () => accountRequests.enqueue(() => invoke<void>('shacraft_logout')),
   startLink: (nickname: string) => accountRequests.enqueue(() => invoke<LinkChallenge>('shacraft_start_link', { nickname })),
+  claimNickname: (nickname: string) => accountRequests.enqueue(() => invoke<ShaCraftAccount>('shacraft_claim_nickname', { nickname })),
   linkStatus: (challengeId: number) => accountRequests.enqueue(() => invoke<LinkStatus>('shacraft_link_status', { challengeId })),
   serverStatus: (profileId: string) => invoke<ServerStatus>('get_server_status', { profileId }),
   installGame: (profileId: string) => invoke<void>('ensure_game_installed', { profileId }),

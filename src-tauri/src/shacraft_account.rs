@@ -6,7 +6,12 @@
 use reqwest::blocking::{Client, Response};
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
-use std::{fmt, fs, io, path::Path, time::Duration};
+use std::{
+    fmt, fs,
+    io::{self, Read},
+    path::Path,
+    time::Duration,
+};
 
 const API_ORIGIN: &str = "https://shacraft.ru";
 const SESSION_FILE: &str = "shacraft-session";
@@ -62,7 +67,6 @@ pub enum AccountError {
     Api(String),
     Io(io::Error),
     InvalidSession,
-    NoLinkedNickname,
 }
 
 impl fmt::Display for AccountError {
@@ -72,9 +76,6 @@ impl fmt::Display for AccountError {
             Self::Api(message) => formatter.write_str(message),
             Self::Io(error) => write!(formatter, "Не удалось сохранить сессию: {error}"),
             Self::InvalidSession => formatter.write_str("Сессия ShaCraft истекла — войдите снова"),
-            Self::NoLinkedNickname => {
-                formatter.write_str("Сначала привяжите игровой ник к серверу Aeronautics")
-            }
         }
     }
 }
@@ -221,18 +222,95 @@ pub fn link_status(data_dir: &Path, challenge_id: i64) -> Result<LinkStatus, Acc
     response.json::<LinkStatus>().map_err(AccountError::Network)
 }
 
-pub fn aeronautics_nickname(data_dir: &Path) -> Result<String, AccountError> {
-    get_account(data_dir)?
-        .links
-        .into_iter()
-        .find(|link| link.server_id == "aoc")
-        .map(|link| link.mc_username)
-        .ok_or(AccountError::NoLinkedNickname)
+const ADMISSION_ENDPOINT: &str = "/api/launcher/v2/admission/tickets";
+
+/// Error responses at this boundary never echo arbitrary response bodies: a
+/// misconfigured proxy/service must not copy credentials into UI diagnostics.
+fn admission_error(status: reqwest::StatusCode) -> AccountError {
+    use reqwest::StatusCode;
+    match status {
+        StatusCode::UNAUTHORIZED => AccountError::InvalidSession,
+        StatusCode::FORBIDDEN => AccountError::Api(
+            "Нет разрешения на вход в Aeronautics. Проверьте привязку ника и доступ к серверу в аккаунте ShaCraft.".into()),
+        StatusCode::CONFLICT => AccountError::Api(
+            "Этот ник уже занят или зарезервирован. Если это ваш игровой ник, обратитесь в поддержку ShaCraft.".into()),
+        StatusCode::NOT_FOUND | StatusCode::SERVICE_UNAVAILABLE => AccountError::Api(
+            "Вход через ShaCraft Launcher пока не настроен на сервере. Повторите попытку позже.".into()),
+        StatusCode::TOO_MANY_REQUESTS => AccountError::Api(
+            "Слишком много запросов входа. Подождите немного и повторите попытку.".into()),
+        _ => AccountError::Api(format!("Не удалось получить разрешение ShaCraft: HTTP {status}")),
+    }
+}
+
+fn checked_admission_response(
+    data_dir: &Path,
+    response: Response,
+) -> Result<Response, AccountError> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let _ = fs::remove_file(session_path(data_dir));
+    }
+    Err(admission_error(response.status()))
+}
+
+/// The server reserves a free nickname atomically for this account. Existing
+/// player names remain reserved for administrator-assisted migration.
+pub fn claim_nickname(data_dir: &Path, nickname: &str) -> Result<Account, AccountError> {
+    let token = load_session(data_dir)?;
+    let response = client()?
+        .post(format!("{API_ORIGIN}/api/launcher/v2/admission/nickname"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({"server_id": "aoc", "mc_username": nickname}))
+        .send()
+        .map_err(AccountError::Network)?;
+    checked_admission_response(data_dir, response)?
+        .json()
+        .map_err(AccountError::Network)
+}
+
+/// Called only after installation, immediately before Java spawn. Nothing in
+/// this response is exposed to the webview or persisted with account settings.
+pub(crate) fn issue_admission(
+    data_dir: &Path,
+) -> Result<crate::admission::Admission, AccountError> {
+    let token = load_session(data_dir)?;
+    let key = crate::admission::AdmissionKey::generate()
+        .map_err(|message| AccountError::Api(message.into()))?;
+    let response = client()?
+        .post(format!("{API_ORIGIN}{ADMISSION_ENDPOINT}"))
+        .bearer_auth(token)
+        .json(&key.request())
+        .send()
+        .map_err(AccountError::Network)?;
+    let response = checked_admission_response(data_dir, response)?;
+    // The expected object is under 256 bytes; bound the remote allocation and
+    // use a fixed parse error without response values or secret-bearing bodies.
+    let mut body = zeroize::Zeroizing::new(Vec::new());
+    response.take(4097).read_to_end(&mut body).map_err(|_| {
+        AccountError::Api(
+            "Не удалось прочитать разрешение на вход. Повторите попытку позже.".into(),
+        )
+    })?;
+    let invalid = || {
+        AccountError::Api(
+            "Сервер вернул некорректное разрешение на вход. Повторите попытку позже.".into(),
+        )
+    };
+    if body.len() > 4096 {
+        return Err(invalid());
+    }
+    let payload = serde_json::from_slice(&body).map_err(|_| invalid())?;
+    key.bind(payload)
+        .map_err(|message| AccountError::Api(message.into()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{load_session, save_session, session_path};
+    use super::{
+        admission_error, issue_admission, load_session, save_session, session_path, AccountError,
+    };
     use std::{
         fs, process,
         time::{SystemTime, UNIX_EPOCH},
@@ -274,5 +352,35 @@ mod tests {
             0
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn admission_without_session_never_falls_back_to_legacy_nickname() {
+        let directory = temporary_directory();
+        crate::settings::save(&directory, crate::settings::LauncherSettings::default()).unwrap();
+        assert!(matches!(
+            issue_admission(&directory),
+            Err(AccountError::InvalidSession)
+        ));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn admission_unavailable_and_revoked_session_have_actionable_errors() {
+        for status in [
+            reqwest::StatusCode::NOT_FOUND,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(admission_error(status)
+                .to_string()
+                .contains("пока не настроен"));
+        }
+        assert!(matches!(
+            admission_error(reqwest::StatusCode::UNAUTHORIZED),
+            AccountError::InvalidSession
+        ));
+        assert!(admission_error(reqwest::StatusCode::CONFLICT)
+            .to_string()
+            .contains("зарезервирован"));
     }
 }

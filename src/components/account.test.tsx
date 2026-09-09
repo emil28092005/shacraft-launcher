@@ -8,6 +8,7 @@ import type { useAccount } from '../hooks/useAccount'
 function session(): ReturnType<typeof useAccount> {
   return {
     account: null, error: null, busy: false, recoveryCodes: [], linkMessage: null,
+    feedback: null, dismissFeedback: () => {},
     linking: false, linkedNickname: null, authenticate: async () => true,
     logout: async () => {}, startLink: async () => {}, clearError: () => {},
     acknowledgeRecoveryCodes: () => {},

@@ -41,15 +41,15 @@ export function AccountSettings({ session, locked }: { session: ReturnType<typeo
         </form>
       )}
       {account && !linkedNickname && (
-        <form onSubmit={(event) => { event.preventDefault(); if (!disabled) void session.startLink(nickname) }}>
+        <form noValidate onSubmit={(event) => { event.preventDefault(); if (!disabled) void session.startLink(nickname) }}>
           <label className="text-setting">
             <span><strong>Игровой ник</strong><small>Aeronautics</small></span>
             <input value={nickname} minLength={3} maxLength={16} pattern="[A-Za-z0-9_]{3,16}" required
               disabled={disabled || session.linking} onChange={(event) => setNickname(event.target.value)} placeholder="Player" />
-            <small>Подтвердите владение ником на сервере Aeronautics.</small>
+            <small>Свободный ник закрепляется за аккаунтом. Для старого игрового ника обратитесь к администратору.</small>
           </label>
           <button className="setting-row" type="submit" disabled={disabled || session.linking}>
-            <span>{session.linking ? 'Ожидаем подтверждения…' : 'Привязать ник'}</span>
+            <span>{session.linking ? 'Ожидаем подтверждения…' : busy ? 'Создаём проверку…' : 'Привязать ник'}</span>
           </button>
         </form>
       )}

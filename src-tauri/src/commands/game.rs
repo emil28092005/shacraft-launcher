@@ -1,7 +1,7 @@
-use super::{data_dir, shacraft::resolve_identity};
+use super::data_dir;
 use crate::{
     java, launch, manifest, mojang, neoforge, operations::LauncherOperations, remote, runtime,
-    settings,
+    settings, shacraft_account,
 };
 use reqwest::blocking::Client;
 use serde::Serialize;
@@ -172,7 +172,6 @@ pub(crate) async fn launch_game(
         let manifest = remote::fetch_manifest(&profile_id).map_err(|error| error.to_string())?;
         let profile_dir = data_dir.join("profiles").join(&manifest.id);
         let settings = settings::load(&data_dir).map_err(|error| error.to_string())?;
-        let identity = resolve_identity(&data_dir, &account_operation)?;
 
         // Everything here should already be installed by `ensure_game_installed`,
         // so these are expected to hit their fast paths; no progress to show.
@@ -201,12 +200,17 @@ pub(crate) async fn launch_game(
         std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
         let log_path = log_dir.join(format!("{profile_id}-{timestamp}.log"));
 
+        // Generate fresh proof only after installation. Keep the account gate
+        // through spawn so local logout/account switching cannot race issuance.
+        let _account_permit = account_operation.acquire("ShaCraft account operation")?;
+        let admission =
+            shacraft_account::issue_admission(&data_dir).map_err(|error| error.to_string())?;
         let request = launch::LaunchRequest {
             java_executable: Path::new(&java_install.executable),
             game_dir: &game_dir,
             profile_dir: &profile_dir,
             merged: &merged,
-            identity: &identity,
+            admission: &admission,
             memory_mb: settings.memory_mb,
             log_path: &log_path,
         };

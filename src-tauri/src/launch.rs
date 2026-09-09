@@ -1,11 +1,10 @@
 //! Builds and spawns the real `java` invocation for a merged launch
-//! profile. The `${auth_*}` placeholders are filled from a `PlayerIdentity`,
-//! which is either a real Microsoft-authenticated session (`msa::LoginResult`)
-//! or an explicit offline account (`PlayerIdentity::Offline`). Offline mode is
-//! never silently substituted for a Microsoft session.
+//! profile. The `${auth_*}` placeholders use only the identity bound to the
+//! server-issued admission ticket. Its one-use proof stays out of arguments
+//! and files; only the Java child's environment receives it.
 
+use crate::admission::Admission;
 use crate::mojang::{self, MergedVersion};
-use crate::session::PlayerIdentity;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -44,7 +43,7 @@ pub struct LaunchRequest<'a> {
     /// the shared `game_dir`.
     pub profile_dir: &'a Path,
     pub merged: &'a MergedVersion,
-    pub identity: &'a PlayerIdentity,
+    pub admission: &'a Admission,
     pub memory_mb: u16,
     pub log_path: &'a Path,
 }
@@ -183,6 +182,10 @@ fn write_jvm_argfile(path: &Path, arguments: &[String]) -> io::Result<()> {
 /// that (see `lib.rs`'s launch command, which watches it on a background
 /// thread and emits an event).
 pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
+    Ok(build_command(request)?.spawn()?)
+}
+
+fn build_command(request: &LaunchRequest) -> Result<Command, LaunchError> {
     fs::create_dir_all(request.profile_dir)?;
     let natives_dir = mojang::natives_directory(request.game_dir, &request.merged.id);
     fs::create_dir_all(&natives_dir)?;
@@ -193,7 +196,8 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     let classpath = build_classpath(request.game_dir, request.merged, &client_jar);
 
     let mut vars: HashMap<&str, String> = HashMap::new();
-    vars.insert("auth_player_name", request.identity.name().to_string());
+    let identity = request.admission.identity();
+    vars.insert("auth_player_name", identity.name().to_string());
     // NeoForge's inherited JVM profile uses `${version_name}.jar` in
     // `-DignoreList`. The actual client jar belongs to the vanilla parent
     // (`1.21.1.jar`), not to the child profile (`neoforge-...`), so this
@@ -203,14 +207,11 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     vars.insert("game_directory", request.profile_dir.display().to_string());
     vars.insert("assets_root", assets_root.display().to_string());
     vars.insert("assets_index_name", request.merged.asset_index.id.clone());
-    vars.insert("auth_uuid", request.identity.uuid());
-    vars.insert(
-        "auth_access_token",
-        request.identity.access_token().to_string(),
-    );
+    vars.insert("auth_uuid", identity.uuid());
+    vars.insert("auth_access_token", identity.access_token().to_string());
     vars.insert("clientid", launcher_client_id(request.game_dir)?);
-    vars.insert("auth_xuid", request.identity.xuid().to_string());
-    vars.insert("user_type", request.identity.user_type().to_string());
+    vars.insert("auth_xuid", identity.xuid().to_string());
+    vars.insert("user_type", identity.user_type().to_string());
     vars.insert("version_type", "ShaCraft Launcher".to_string());
     vars.insert("natives_directory", natives_dir.display().to_string());
     vars.insert("launcher_name", "ShaCraft Launcher".to_string());
@@ -227,6 +228,7 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     let game_args = mojang::resolve_arguments(&request.merged.game_arguments, &no_features);
 
     let mut command = Command::new(request.java_executable);
+    request.admission.configure_child(&mut command);
     let memory_argument = format!("-Xmx{}M", request.memory_mb);
     if cfg!(windows) {
         let argfile = request.profile_dir.join(".shacraft-jvm.args");
@@ -249,12 +251,78 @@ pub fn launch(request: &LaunchRequest) -> Result<Child, LaunchError> {
     command.stdout(Stdio::from(log_file.try_clone()?));
     command.stderr(Stdio::from(log_file));
 
-    Ok(command.spawn()?)
+    Ok(command)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_arguments_and_written_files_never_contain_admission_secrets() {
+        use crate::admission::{AdmissionKey, PRIVATE_KEY_ENV, TICKET_ENV};
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let directory =
+            std::env::temp_dir().join(format!("shacraft-launch-proof-{}", random_uuid_v4()));
+        let game_dir = directory.join("game");
+        let profile_dir = directory.join("profile");
+        let log_path = directory.join("game.log");
+        let vanilla: mojang::VersionJson = serde_json::from_value(serde_json::json!({
+            "id": "1.21.1",
+            "mainClass": "net.minecraft.client.main.Main",
+            "arguments": {
+                "game": ["--username", "${auth_player_name}", "--uuid", "${auth_uuid}", "--accessToken", "${auth_access_token}"],
+                "jvm": ["-cp", "${classpath}", "-Dlauncher=${launcher_name}"]
+            },
+            "assetIndex": {"id": "17", "sha1": "0".repeat(40), "size": 1, "url": "https://piston-meta.mojang.com/assets"},
+            "downloads": {"client": {"sha1": "0".repeat(40), "size": 1, "url": "https://piston-data.mojang.com/client.jar"}}
+        })).unwrap();
+        let merged = mojang::merge_versions(&vanilla, None).unwrap();
+        let response = serde_json::from_value(serde_json::json!({
+            "ticket_id": URL_SAFE_NO_PAD.encode([73_u8; 32]), "mc_username": "Ticket_Name",
+            "server_id": "aoc", "expires_in_seconds": 600
+        }))
+        .unwrap();
+        let admission = AdmissionKey::generate().unwrap().bind(response).unwrap();
+        let request = LaunchRequest {
+            java_executable: Path::new("java"),
+            game_dir: &game_dir,
+            profile_dir: &profile_dir,
+            merged: &merged,
+            admission: &admission,
+            memory_mb: 6144,
+            log_path: &log_path,
+        };
+        let command = build_command(&request).unwrap();
+        let env: HashMap<_, _> = command.get_envs().collect();
+        let proof = [TICKET_ENV, PRIVATE_KEY_ENV]
+            .map(|name| env[std::ffi::OsStr::new(name)].unwrap().to_str().unwrap());
+        let arguments: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy())
+            .collect();
+        assert!(arguments
+            .windows(2)
+            .any(|args| args == ["--username", "Ticket_Name"]));
+        assert!(arguments
+            .windows(2)
+            .any(|args| args == ["--accessToken", "0"]));
+        for secret in proof {
+            assert!(arguments.iter().all(|argument| !argument.contains(secret)));
+            for path in [
+                log_path.clone(),
+                game_dir.join(".shacraft-client-id"),
+                profile_dir.join(".shacraft-jvm.args"),
+            ] {
+                if path.exists() {
+                    assert!(!fs::read_to_string(path).unwrap().contains(secret));
+                }
+            }
+        }
+        drop(command);
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn generates_rfc4122_version_4_uuids() {

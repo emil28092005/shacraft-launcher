@@ -1,3 +1,4 @@
+mod admission;
 mod download;
 mod java;
 mod launch;
@@ -34,6 +35,7 @@ pub fn run() {
             commands::shacraft::get_shacraft_account,
             commands::shacraft::shacraft_logout,
             commands::shacraft::shacraft_start_link,
+            commands::shacraft::shacraft_claim_nickname,
             commands::shacraft::shacraft_link_status,
             commands::account::start_microsoft_login,
             commands::account::get_account,
