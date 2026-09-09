@@ -45,6 +45,13 @@ const MINECRAFT_LOGIN_URL: &str = "https://api.minecraftservices.com/authenticat
 const MINECRAFT_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 const ACCOUNT_FILE: &str = "account.json";
 
+pub fn http_client() -> Result<Client, reqwest::Error> {
+    crate::trusted_http::client(&[
+        "login.microsoftonline.com", "user.auth.xboxlive.com",
+        "xsts.auth.xboxlive.com", "api.minecraftservices.com",
+    ], Duration::from_secs(30))
+}
+
 #[derive(Debug)]
 pub enum MsaError {
     NotConfigured,
@@ -405,14 +412,7 @@ pub fn save_refresh_token(data_dir: &Path, refresh_token: &str) -> io::Result<()
     let contents = serde_json::to_vec_pretty(&StoredAccount { refresh_token: refresh_token.to_string(), saved_at_unix }).expect("StoredAccount is serializable");
 
     let target = data_dir.join(ACCOUNT_FILE);
-    let temporary = data_dir.join(".account.json.shacraft.part");
-    fs::write(&temporary, contents)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
-    }
-    fs::rename(temporary, target)
+    crate::storage::write_atomic(&target, &contents)
 }
 
 pub fn load_refresh_token(data_dir: &Path) -> Option<String> {

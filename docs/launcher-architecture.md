@@ -28,7 +28,7 @@ Game itself (never controlled by the manifest above)
   -> Java 21 via Adoptium if none installed (runtime.rs)
   -> NeoForge's own installer, run headlessly (neoforge.rs)
   -> generic inheritsFrom merge of the two version JSONs (mojang.rs)
-  -> real Microsoft/Xbox/Minecraft Services login (msa.rs)
+  -> explicit Microsoft session (msa.rs) OR offline identity (session.rs)
   -> java process spawned with the merged classpath/args (launch.rs)
 ```
 
@@ -53,14 +53,41 @@ be the system `.minecraft` directory.
 - ShaCraft download files: HTTPS only, exact hosts `shacraft.ru` and
   `cdn.shacraft.ru`.
 
+## Module boundaries (2026-09-09)
+
+React entrypoint → App/components → hooks → typed native service. Pure
+reducers own game and profile states; IPC failures retain their real message.
+Settings writes are serialized, and account restoration is single-flight
+even under React StrictMode. A failed repair invalidates profile readiness.
+Game exit may arrive before launch acknowledgement; the reducer handles both.
+Browser preview cannot install/launch and does not simulate download progress.
+
+Rust `lib.rs` registers commands from `commands/`. Install/account permits in
+`operations.rs` stay owned by blocking workers until completion. These are
+process-local guards, not cross-process locks or cancellation support.
+`storage.rs` provides unique temporary files and atomic replacement; Unix
+account files are created owner-only rather than chmodded after writing.
+`trusted_http.rs` constrains initial provider URLs and every redirect.
+Manifest profile identity, size, signature, portable paths and existing
+symlinks are checked before managed file writes. Local same-user TOCTOU is
+outside this protection; do not describe it as an OS sandbox.
+
+## Verification and distribution
+
+`npm test` covers asynchronous helpers and state transitions;
+`npm run build` runs strict TypeScript before Vite. `cargo test --locked`
+covers native policy and storage. Push/PR CI repeats these checks on Linux.
+Manual `build.yml` builds Windows x64, Linux x64 and both macOS architectures
+and uploads bundles. Packages are not yet signed release artifacts.
+
 ## Planned but not implemented
 
 1. User-selectable profile directory and structured launcher logs.
 2. "Reset managed files only" recovery action that doesn't touch player
    worlds/screenshots/resourcepacks.
 3. Signed, cross-platform release builds of the launcher itself.
-4. Real per-stage byte progress for the Java/NeoForge install steps
-   (currently start/done only — the dominant, user-visible wait, asset
-   downloading, already reports real bytes).
+4. Cancellation, structured logs and full cold-install/recovery beta on
+   every target OS. Current install progress reports actual stage work;
+   bytes and installer completion counts are not interchangeable units.
 
 Do not represent these as completed features in UI or release notes.

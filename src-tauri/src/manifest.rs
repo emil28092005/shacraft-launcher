@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use std::{collections::HashSet, fmt};
-use url::Url;
 
 const MAX_MANIFEST_BYTES: usize = 2 * 1024 * 1024;
 const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -82,19 +81,27 @@ fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
         )));
     }
     if !is_identifier(&manifest.id) {
-        return Err(ManifestError::Invalid("Profile id must contain only lowercase letters, numbers and hyphens".into()));
+        return Err(ManifestError::Invalid(
+            "Profile id must contain only lowercase letters, numbers and hyphens".into(),
+        ));
     }
     if manifest.display_name.trim().is_empty() {
-        return Err(ManifestError::Invalid("Profile displayName cannot be empty".into()));
+        return Err(ManifestError::Invalid(
+            "Profile displayName cannot be empty".into(),
+        ));
     }
-    if manifest.minecraft.version.trim().is_empty()
+    if !is_version(&manifest.minecraft.version)
         || manifest.minecraft.loader.kind.trim().is_empty()
-        || manifest.minecraft.loader.version.trim().is_empty()
+        || !is_version(&manifest.minecraft.loader.version)
     {
-        return Err(ManifestError::Invalid("Minecraft version and loader must be specified".into()));
+        return Err(ManifestError::Invalid(
+            "Minecraft version and loader must be specified".into(),
+        ));
     }
     if !(8..=25).contains(&manifest.minecraft.java_major) {
-        return Err(ManifestError::Invalid("Unsupported Java major version".into()));
+        return Err(ManifestError::Invalid(
+            "Unsupported Java major version".into(),
+        ));
     }
 
     let mut paths = HashSet::new();
@@ -103,19 +110,35 @@ fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
             FilePolicy::Managed | FilePolicy::Seed => {}
         }
         if !is_safe_relative_path(&file.path) {
-            return Err(ManifestError::Invalid(format!("Unsafe file path: {}", file.path)));
+            return Err(ManifestError::Invalid(format!(
+                "Unsafe file path: {}",
+                file.path
+            )));
         }
-        if !paths.insert(&file.path) {
-            return Err(ManifestError::Invalid(format!("Duplicate file path: {}", file.path)));
+        // A manifest must resolve to the same distinct files on Windows/macOS.
+        if !paths.insert(file.path.to_lowercase()) {
+            return Err(ManifestError::Invalid(format!(
+                "Duplicate file path: {}",
+                file.path
+            )));
         }
         if !is_allowed_download_url(&file.url) {
-            return Err(ManifestError::Invalid(format!("File URL must use HTTPS and a ShaCraft host: {}", file.path)));
+            return Err(ManifestError::Invalid(format!(
+                "File URL must use HTTPS and a ShaCraft host: {}",
+                file.path
+            )));
         }
         if file.size == 0 {
-            return Err(ManifestError::Invalid(format!("File has zero size: {}", file.path)));
+            return Err(ManifestError::Invalid(format!(
+                "File has zero size: {}",
+                file.path
+            )));
         }
         if file.sha256.len() != 64 || !file.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(ManifestError::Invalid(format!("Invalid SHA-256 for {}", file.path)));
+            return Err(ManifestError::Invalid(format!(
+                "Invalid SHA-256 for {}",
+                file.path
+            )));
         }
     }
     Ok(())
@@ -124,22 +147,49 @@ fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
 fn is_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 48
-        && value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn is_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value != "."
+        && value != ".."
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b".-_".contains(&byte))
 }
 
 fn is_safe_relative_path(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('/')
-        && !value.starts_with('\\')
-        && !value.contains('\\')
-        && !value.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+    !value.is_empty() && value.split('/').all(is_portable_component)
+}
+
+pub(crate) fn is_portable_component(value: &str) -> bool {
+    if value.is_empty()
+        || value.ends_with(['.', ' '])
+        || value
+            .chars()
+            .any(|ch| ch.is_control() || "\\:<>\"|?*".contains(ch))
+    {
+        return false;
+    }
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) && !(stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 pub(crate) fn is_allowed_download_url(value: &str) -> bool {
-    let Ok(url) = Url::parse(value) else {
-        return false;
-    };
-    url.scheme() == "https" && url.host_str().is_some_and(|host| DOWNLOAD_HOSTS.contains(&host))
+    crate::trusted_http::allows(value, &DOWNLOAD_HOSTS)
 }
 
 #[cfg(test)]
@@ -178,5 +228,36 @@ mod tests {
     #[test]
     fn rejects_third_party_download_hosts() {
         assert!(validate_json(&VALID.replace("cdn.shacraft.ru", "example.com")).is_err());
+    }
+
+    #[test]
+    fn rejects_nonportable_paths_and_version_traversal() {
+        for path in [
+            "C:/escape.jar",
+            "mods/file.jar:stream",
+            "mods/CON.jar",
+            "mods/LPT1",
+            "mods/file.jar.",
+            "mods/file.jar ",
+            "mods//file.jar",
+            "mods/../file.jar",
+        ] {
+            assert!(
+                validate_json(&VALID.replace("mods/example.jar", path)).is_err(),
+                "{path}"
+            );
+        }
+        assert!(validate_json(&VALID.replace("21.1.248", "../../escape")).is_err());
+    }
+
+    #[test]
+    fn rejects_ambiguous_download_authorities() {
+        for host in [
+            "user@cdn.shacraft.ru",
+            "cdn.shacraft.ru:444",
+            "cdn.shacraft.ru.evil.example",
+        ] {
+            assert!(validate_json(&VALID.replace("cdn.shacraft.ru", host)).is_err());
+        }
     }
 }

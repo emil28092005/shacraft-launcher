@@ -48,9 +48,20 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 
 ## Layout
 
-- `src/main.tsx` — UI state and Tauri command calls; do not put privileged
-  operations in the web layer.
+- `src/main.tsx` — React entrypoint; `src/App.tsx` composes the screen.
+- `src/components/` — presentational UI; `src/hooks/` — lifecycle/settings/account.
+- `src/services/native.ts` — typed IPC and event subscriptions; keep schemas
+  aligned with Rust. `src/services/async.ts` — serialized writes, single-flight
+  account restore and listener disposal. `src/state/` — tested reducers.
+- Native filesystem/network/process operations never belong in the web layer.
 - `src-tauri/src/` — native commands and security-sensitive logic.
+  - `lib.rs` — module/command registration only; `commands/` holds adapters
+    for account/game/host/preferences/profiles. Unsigned sync/inspect IPC was
+    removed; only verified remote manifests may drive profile mutations.
+  - `operations.rs` — process-local install/account permits owned by workers.
+    Offline launch must not acquire the Microsoft refresh permit.
+  - `storage.rs` — unique same-directory atomic writes, owner-only Unix files.
+  - `trusted_http.rs` — HTTPS and exact-host redirect policy per game provider.
   - `download.rs` — shared verified-download helper (temp file, hash,
     atomic rename, progress callback); `manifest.rs`/`profile.rs` (ShaCraft
     mods) and `mojang.rs`/`neoforge.rs`/`runtime.rs` (the game itself) all
@@ -70,13 +81,17 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   (mods/config only).
 - `docs/game-trust-boundary.md` — the Mojang/NeoForge/Microsoft/Adoptium
   trust domains used to install and run the game itself.
-- `.github/workflows/build.yml` — manual cross-platform build matrix.
+- `.github/workflows/check.yml` — push/PR UI checks and Linux Rust tests.
+- `.github/workflows/build.yml` — manual cross-platform builds with artifacts;
+  not a signed release or updater publication.
 
 ## Verification
 
 Run from repository root:
 
 ```bash
+npm ci
+npm test
 npm run build
 (cd src-tauri && /home/emil/.cargo/bin/cargo test)
 npm run tauri:dev
@@ -84,6 +99,9 @@ npm run tauri:dev
 
 `tauri:dev` is for local desktop testing. A successful web build alone does
 not prove Tauri commands work.
+
+See `PLAN.md` for known gaps. Never label browser preview or unit tests as
+a successful cold game install / Microsoft OAuth / Windows/macOS beta test.
 
 ## Working conventions
 

@@ -1,41 +1,49 @@
 # ShaCraft Launcher
 
-Кроссплатформенный лаунчер для сети Minecraft-серверов ShaCraft.
+Кроссплатформенный Tauri 2 лаунчер для [ShaCraft](https://shacraft.ru/):
+React/TypeScript интерфейс, Rust — файлы, сеть и запуск процессов.
 
-Сейчас реализовано:
+Реализованы подписанная синхронизация Aeronautics, проверка/восстановление
+модов и конфигурации, Java discovery/provisioning, bootstrap Minecraft и
+NeoForge, настройки памяти и ника, обработка установки/запуска/выхода.
 
-- интерактивный интерфейс профилей и настроек;
-- Tauri 2 native shell с безопасной командой `native_host`;
-- сохранение памяти профиля в локальном каталоге данных приложения;
-- безопасное обнаружение установленной Java (включая `JAVA_HOME`) перед запуском;
-- интеграция с фиксированным ShaCraft launcher v2 manifest для Aeronautics;
-- адаптивное окно для Windows, Linux и macOS;
-- вход через настоящий аккаунт Microsoft (без него игра не устанавливается
-  и не запускается — так владение игрой проверяется по-настоящему);
-- установка Minecraft и NeoForge версии, которую задаёт manifest, и запуск
-  игры.
+Режим аккаунта выбирается явно: offline-профиль или Microsoft. Код Microsoft
+OAuth/проверки владения готов, но **вход ещё требует собственного client ID и
+одобрения Minecraft API**. Offline не подставляется при ошибке Microsoft.
 
-## Локальная разработка
+## Разработка
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Для нативного приложения нужен Rust:
+Это браузерный preview — он не устанавливает и не запускает игру.
+Для приложения нужен Rust и системные зависимости Tauri:
 
 ```bash
 npm run tauri:dev
 ```
 
-На Ubuntu для сборки Tauri также потребуются системные пакеты WebKit/GTK и
-DBus development headers. Их установка описана в официальной документации
-Tauri и требует прав администратора.
+## Проверка
 
-## Статус
+```bash
+npm test
+npm run build
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+```
 
-Вход через Microsoft, установка и запуск Aeronautics уже работают. Вход
-через Microsoft пока не активен на боевой сборке: нужна собственная
-регистрация приложения ShaCraft в Azure AD и её одобрение Microsoft для
-доступа к Minecraft API — см. комментарий к `MSA_CLIENT_ID` в
-`src-tauri/src/msa.rs`.
+Build включает строгий TypeScript. GitHub Actions проверяет UI и Rust на
+push/PR; ручной workflow собирает пакеты Windows x64, Linux x64, macOS Intel
+и Apple Silicon и сохраняет артефакты. Подпись релиза/автообновления ещё впереди.
+Используемые macOS runners соответствуют [списку GitHub](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+## Навигация
+
+- [Архитектура](docs/launcher-architecture.md) — компоненты, данные, IPC.
+- [Trust boundaries](docs/game-trust-boundary.md) — доверенные источники игры.
+- [Manifest](docs/manifest-v1.md) — подписанный контракт модпака.
+- [PLAN.md](PLAN.md) — ограничения и следующие шаги.
+- [AGENTS.md](AGENTS.md) — инструкции для следующего разработчика/агента.
+
+Не хранить в Git токены, ключи, пользовательские данные или пакеты игры.

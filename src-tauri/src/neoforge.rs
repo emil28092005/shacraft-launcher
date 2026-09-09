@@ -39,7 +39,6 @@ use std::{
     },
     thread,
 };
-use url::Url;
 
 const NEOFORGE_HOST: &str = "maven.neoforged.net";
 
@@ -89,7 +88,11 @@ impl From<io::Error> for NeoForgeError {
 }
 
 fn is_allowed_host(url: &str) -> bool {
-    Url::parse(url).ok().and_then(|parsed| parsed.host_str().map(|host| host == NEOFORGE_HOST)).unwrap_or(false)
+    crate::trusted_http::allows(url, &[NEOFORGE_HOST])
+}
+
+pub fn http_client() -> Result<Client, reqwest::Error> {
+    crate::trusted_http::client(&[NEOFORGE_HOST], std::time::Duration::from_secs(10 * 60))
 }
 
 fn installer_jar_url(loader_version: &str) -> String {

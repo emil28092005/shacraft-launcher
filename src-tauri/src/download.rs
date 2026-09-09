@@ -1,11 +1,12 @@
-use reqwest::blocking::{Client, Response};
+use crate::storage::AtomicFile;
+use reqwest::blocking::Client;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::{
     fmt,
     fs::{self, File},
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
@@ -73,12 +74,19 @@ pub fn file_hashes(path: &Path) -> io::Result<(String, String)> {
         sha1.update(&buffer[..read]);
         sha256.update(&buffer[..read]);
     }
-    Ok((format!("{:x}", sha1.finalize()), format!("{:x}", sha256.finalize())))
+    Ok((
+        format!("{:x}", sha1.finalize()),
+        format!("{:x}", sha256.finalize()),
+    ))
 }
 
 /// True if `path` already exists, matches `expected_size` (when given) and
 /// `checksum`. Used to skip re-downloading files that are already current.
-pub fn is_current(path: &Path, expected_size: Option<u64>, checksum: &Checksum) -> io::Result<bool> {
+pub fn is_current(
+    path: &Path,
+    expected_size: Option<u64>,
+    checksum: &Checksum,
+) -> io::Result<bool> {
     let metadata = match path.metadata() {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -94,14 +102,6 @@ pub fn is_current(path: &Path, expected_size: Option<u64>, checksum: &Checksum) 
     }
     let (sha1_hex, sha256_hex) = file_hashes(path)?;
     Ok(checksum.matches(&sha1_hex, &sha256_hex))
-}
-
-fn temp_path(target: &Path) -> Result<PathBuf, DownloadError> {
-    let file_name = target
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(DownloadError::InvalidTargetPath)?;
-    Ok(target.with_file_name(format!(".{file_name}.shacraft.part")))
 }
 
 /// Downloads `url` to `target`, verifying size (if known ahead of time) and
@@ -126,30 +126,34 @@ pub fn download_verified(
     let total = expected_size.or_else(|| response.content_length());
     if let (Some(expected), Some(length)) = (expected_size, response.content_length()) {
         if expected != length {
-            return Err(DownloadError::SizeMismatch { expected, actual: length });
+            return Err(DownloadError::SizeMismatch {
+                expected,
+                actual: length,
+            });
         }
     }
 
-    let temporary = temp_path(target)?;
-    let result = write_and_verify(&mut response, &temporary, expected_size, checksum, total, &mut on_progress);
-    if let Err(error) = result {
-        let _ = fs::remove_file(&temporary);
-        return Err(error);
-    }
-    let bytes = result.unwrap();
-    fs::rename(&temporary, target).map_err(DownloadError::Io)?;
+    let mut output = AtomicFile::new(target).map_err(DownloadError::Io)?;
+    let bytes = write_and_verify(
+        &mut response,
+        output.writer(),
+        expected_size,
+        checksum,
+        total,
+        &mut on_progress,
+    )?;
+    output.commit().map_err(DownloadError::Io)?;
     Ok(bytes)
 }
 
 fn write_and_verify(
-    response: &mut Response,
-    temporary: &Path,
+    response: &mut impl Read,
+    output: &mut impl Write,
     expected_size: Option<u64>,
     checksum: &Checksum,
     total: Option<u64>,
     on_progress: &mut impl FnMut(u64, Option<u64>),
 ) -> Result<u64, DownloadError> {
-    let mut output = File::create(temporary).map_err(DownloadError::Io)?;
     let mut sha1 = Sha1::new();
     let mut sha256 = Sha256::new();
     let mut bytes = 0_u64;
@@ -160,17 +164,29 @@ fn write_and_verify(
         if read == 0 {
             break;
         }
-        output.write_all(&buffer[..read]).map_err(DownloadError::Io)?;
+        bytes += read as u64;
+        if let Some(expected) = expected_size {
+            if bytes > expected {
+                return Err(DownloadError::SizeMismatch {
+                    expected,
+                    actual: bytes,
+                });
+            }
+        }
+        output
+            .write_all(&buffer[..read])
+            .map_err(DownloadError::Io)?;
         sha1.update(&buffer[..read]);
         sha256.update(&buffer[..read]);
-        bytes += read as u64;
         on_progress(bytes, total);
     }
-    output.sync_all().map_err(DownloadError::Io)?;
 
     if let Some(expected) = expected_size {
         if bytes != expected {
-            return Err(DownloadError::SizeMismatch { expected, actual: bytes });
+            return Err(DownloadError::SizeMismatch {
+                expected,
+                actual: bytes,
+            });
         }
     }
     let sha1_hex = format!("{:x}", sha1.finalize());
@@ -184,13 +200,19 @@ fn write_and_verify(
 #[cfg(test)]
 mod tests {
     use super::{file_hashes, is_current, Checksum};
-    use std::{fs, process, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs, process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_file(contents: &[u8]) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
             "shacraft-download-test-{}-{}",
             process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::write(&path, contents).unwrap();
         path
@@ -201,7 +223,10 @@ mod tests {
         let path = temp_file(b"hello shacraft");
         let (sha1_hex, sha256_hex) = file_hashes(&path).unwrap();
         assert_eq!(sha1_hex, "124b319646ec08b4fb2a2b65bbd21c0431b4eaf4");
-        assert_eq!(sha256_hex, "d34eb8ea6396e8492109813c717f7eefd0437c10ff55a7b11949cfae900c946d");
+        assert_eq!(
+            sha256_hex,
+            "d34eb8ea6396e8492109813c717f7eefd0437c10ff55a7b11949cfae900c946d"
+        );
         fs::remove_file(path).unwrap();
     }
 
@@ -219,5 +244,58 @@ mod tests {
     fn is_current_false_for_missing_file() {
         let path = std::env::temp_dir().join("shacraft-download-test-missing-file-xyz");
         assert!(!is_current(&path, None, &Checksum::Sha256("0".repeat(64))).unwrap());
+    }
+
+    #[test]
+    fn failed_download_keeps_existing_file_and_cleans_temporary() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
+        let path = temp_file(b"previous version");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/test.jar", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\ncorrupt",
+                )
+                .unwrap();
+        });
+        let error = super::download_verified(
+            &reqwest::blocking::Client::new(),
+            &url,
+            &path,
+            Some(7),
+            &Checksum::Sha256("0".repeat(64)),
+            |_, _| {},
+        )
+        .unwrap_err();
+        assert!(matches!(error, super::DownloadError::ChecksumMismatch));
+        assert_eq!(fs::read(&path).unwrap(), b"previous version");
+        server.join().unwrap();
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn oversized_body_is_stopped_before_writing_excess() {
+        let mut output = Vec::new();
+        let error = super::write_and_verify(
+            &mut std::io::repeat(b'x'),
+            &mut output,
+            Some(2),
+            &Checksum::Sha256("0".repeat(64)),
+            Some(2),
+            &mut |_, _| {},
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            super::DownloadError::SizeMismatch { expected: 2, .. }
+        ));
+        assert!(output.is_empty());
     }
 }

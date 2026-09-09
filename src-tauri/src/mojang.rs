@@ -25,7 +25,6 @@ use std::{
         Arc, Mutex,
     },
 };
-use url::Url;
 
 const VERSION_MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const MOJANG_HOSTS: [&str; 4] = [
@@ -41,7 +40,11 @@ const MOJANG_HOSTS: [&str; 4] = [
 const ASSET_WORKERS: usize = 48;
 
 pub fn is_allowed_host(url: &str) -> bool {
-    Url::parse(url).ok().and_then(|parsed| parsed.host_str().map(|host| MOJANG_HOSTS.contains(&host))).unwrap_or(false)
+    crate::trusted_http::allows(url, &MOJANG_HOSTS)
+}
+
+pub fn http_client() -> Result<Client, reqwest::Error> {
+    crate::trusted_http::client(&MOJANG_HOSTS, std::time::Duration::from_secs(10 * 60))
 }
 
 #[derive(Debug)]

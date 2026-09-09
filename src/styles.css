@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600&display=swap');
 
 :root {
+  color-scheme: dark;
   font-family: 'Manrope', sans-serif;
   color: #eef2ed;
   background: #090c0a;
@@ -17,10 +18,11 @@
 }
 
 * { box-sizing: border-box; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { color: inherit; }
 body { margin: 0; min-width: 1040px; min-height: 680px; overflow: hidden; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+button:disabled { cursor: default; }
 
 .app-shell {
   height: 100vh;
@@ -77,6 +79,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--green); out
 .account-chip strong { font-size: 12px; }
 .account-chip small { color: #6d756e; font-size: 9px; }
 .account-chip svg { color: #555e56; }
+.account-logout { padding: 0; background: transparent; border: 0; cursor: pointer; color: inherit; }
 
 .stage { position: relative; overflow: hidden; isolation: isolate; background: #16231b; }
 .stage::before { content: ''; position: absolute; inset: 0; z-index: -5; background:
@@ -125,7 +128,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--green); out
 
 .drawer-backdrop { position: fixed; inset: 48px 0 0; background: rgba(0,0,0,.44); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; }
 .drawer-backdrop.visible { opacity: 1; pointer-events: auto; }
-.settings-drawer { position: fixed; top: 48px; right: 0; bottom: 0; width: 390px; background: #121713; border-left: 1px solid var(--line); z-index: 21; padding: 28px; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); box-shadow: -30px 0 70px rgba(0,0,0,.35); }
+.settings-drawer { position: fixed; top: 48px; right: 0; bottom: 0; width: 390px; overflow-y: auto; background: #121713; border-left: 1px solid var(--line); z-index: 21; padding: 28px; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); box-shadow: -30px 0 70px rgba(0,0,0,.35); }
 .settings-drawer.open { transform: translateX(0); }
 .drawer-title { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 34px; }
 .drawer-title p { color: #737c74; font-size: 11px; margin: 0 0 5px; }
@@ -144,13 +147,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--green); out
 .setting-row.static { cursor: default; }
 .setting-row.static:hover { color: #abb3ac; }
 .setting-row small { color: #7f8a80; font-size: 11px; }
+.setting-row select { background: #121713; border: 0; color: inherit; text-align: right; }
 .text-setting { display: grid; gap: 9px; padding: 18px 0; border-bottom: 1px solid var(--line); }
 .text-setting > span { display: flex; align-items: baseline; justify-content: space-between; }
 .text-setting strong { font-size: 12px; }
 .text-setting span small, .text-setting > small { color: #7f8a80; font-size: 11px; }
 .text-setting input { width: 100%; box-sizing: border-box; background: #0d110e; color: #eef2ed; border: 1px solid #384239; padding: 10px 11px; font: 600 13px/1 Manrope, sans-serif; outline: none; }
-.text-setting input:focus { border-color: var(--accent); }
-.drawer-note { position: absolute; left: 28px; right: 28px; bottom: 26px; padding: 13px 15px; background: #17231a; color: #8fb193; border-radius: 10px; font-size: 10px; }
+.text-setting input:focus { border-color: var(--green); }
+.drawer-note { margin-top: 24px; overflow-wrap: anywhere; padding: 13px 15px; background: #17231a; color: #8fb193; border-radius: 10px; font-size: 10px; }
+.settings-feedback { font-size: 11px; color: var(--muted); }
+.settings-feedback button { padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--line); cursor: pointer; }
+.status-error, .build-state .status-error, .text-setting > .status-error { color: #eea18f; overflow-wrap: anywhere; }
+.build-state .status-error { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 .login-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 22; width: 360px; background: #121713; border: 1px solid var(--line); border-radius: 14px; padding: 26px; text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
 .login-modal h2 { margin: 0 0 10px; font-family: 'Unbounded'; font-size: 18px; }

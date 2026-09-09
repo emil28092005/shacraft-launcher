@@ -12,12 +12,18 @@ use serde::Deserialize;
 use std::{fmt, fs, io, path::{Path, PathBuf}};
 
 const ADOPTIUM_HOST: &str = "api.adoptium.net";
+const RUNTIME_HOSTS: [&str; 4] = [ADOPTIUM_HOST, "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
+
+pub fn http_client() -> Result<Client, reqwest::Error> {
+    crate::trusted_http::client(&RUNTIME_HOSTS, std::time::Duration::from_secs(10 * 60))
+}
 
 #[derive(Debug)]
 pub enum RuntimeError {
     Network(reqwest::Error),
     HttpStatus(reqwest::StatusCode),
     NoRelease,
+    UntrustedPackage,
     UnexpectedArchiveLayout,
     Download(DownloadError),
     Io(io::Error),
@@ -30,6 +36,7 @@ impl fmt::Display for RuntimeError {
             Self::Network(error) => write!(formatter, "network error: {error}"),
             Self::HttpStatus(status) => write!(formatter, "Adoptium returned {status}"),
             Self::NoRelease => formatter.write_str("Adoptium has no matching JRE release for this platform"),
+            Self::UntrustedPackage => formatter.write_str("Adoptium package has an unsafe archive name, URL or checksum"),
             Self::UnexpectedArchiveLayout => formatter.write_str("Java archive did not contain a single top-level directory as expected"),
             Self::Download(error) => write!(formatter, "{error}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
@@ -74,6 +81,18 @@ struct AdoptiumPackage {
     link: String,
     checksum: String,
     name: String,
+}
+
+fn validate_package(package: &AdoptiumPackage) -> Result<(), RuntimeError> {
+    if !crate::manifest::is_portable_component(&package.name)
+        || package.name.contains('/')
+        || !(package.name.ends_with(".tar.gz") || package.name.ends_with(".zip"))
+        || !crate::trusted_http::allows(&package.link, &RUNTIME_HOSTS)
+        || package.checksum.len() != 64
+        || !package.checksum.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(RuntimeError::UntrustedPackage);
+    }
+    Ok(())
 }
 
 fn adoptium_os() -> &'static str {
@@ -138,6 +157,7 @@ pub fn ensure_runtime(client: &Client, runtime_root: &Path, major: u8, on_progre
     }
     let assets: Vec<AdoptiumAsset> = response.json()?;
     let package = assets.into_iter().next().map(|asset| asset.binary.package).ok_or(RuntimeError::NoRelease)?;
+    validate_package(&package)?;
 
     fs::create_dir_all(runtime_root)?;
     let archive_path = runtime_root.join(&package.name);
@@ -208,6 +228,42 @@ mod tests {
         let dir = Path::new("/tmp/example-runtime");
         let path = java_path_in(dir);
         assert!(path.ends_with(java_executable_name()));
+    }
+
+    fn package() -> AdoptiumPackage {
+        AdoptiumPackage {
+            name: "OpenJDK21U-jre_x64_linux_hotspot_21.0.8_9.tar.gz".into(),
+            link: "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/runtime.tar.gz".into(),
+            checksum: "a".repeat(64),
+        }
+    }
+
+    #[test]
+    fn accepts_only_portable_runtime_archive_names() {
+        assert!(validate_package(&package()).is_ok());
+        let mut windows = package();
+        windows.name = "OpenJDK21U-jre_x64_windows_hotspot.zip".into();
+        assert!(validate_package(&windows).is_ok());
+        for name in ["../runtime.tar.gz", "/runtime.zip", "C:\\runtime.zip", "runtime.zip:stream", "CON.zip", "LPT1.zip", "runtime.zip.", "runtime.zip ", "runtime.exe"] {
+            let mut malicious = package();
+            malicious.name = name.into();
+            assert!(matches!(validate_package(&malicious), Err(RuntimeError::UntrustedPackage)), "{name}");
+        }
+    }
+
+    #[test]
+    fn rejects_untrusted_runtime_urls_and_invalid_hashes() {
+        for link in ["http://github.com/runtime.zip", "https://evil.example/runtime.zip", "https://github.com.evil.example/runtime.zip", "https://user@github.com/runtime.zip"] {
+            let mut malicious = package();
+            malicious.link = link.into();
+            assert!(validate_package(&malicious).is_err());
+        }
+        let mut malicious = package();
+        malicious.checksum = "not-a-checksum".into();
+        assert!(validate_package(&malicious).is_err());
+        for host in RUNTIME_HOSTS {
+            assert!(crate::trusted_http::allows(&format!("https://{host}/release.tar.gz"), &RUNTIME_HOSTS));
+        }
     }
 
     /// Live smoke test: resolves the current platform's latest Temurin 21

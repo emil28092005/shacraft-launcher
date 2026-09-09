@@ -3,6 +3,9 @@ name: Cross-platform build
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: ${{ matrix.name }}
@@ -14,13 +17,13 @@ jobs:
             os: ubuntu-22.04
             args: --bundles appimage,deb
           - name: Windows x64
-            os: windows-latest
+            os: windows-2022
             args: --bundles nsis,msi
           - name: macOS Apple Silicon
-            os: macos-14
+            os: macos-15
             args: --target aarch64-apple-darwin --bundles dmg
           - name: macOS Intel
-            os: macos-13
+            os: macos-15-intel
             args: --target x86_64-apple-darwin --bundles dmg
 
     runs-on: ${{ matrix.os }}
@@ -32,5 +35,19 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: npm ci
+      - run: npm test
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: npm run tauri:build -- ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shacraft-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/**
+            src-tauri/target/*/release/bundle/**
