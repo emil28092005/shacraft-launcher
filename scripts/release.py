@@ -250,7 +250,7 @@ def collect(root, bundle, destination, platform, version):
             )
             shutil.copyfile(source_signature, signature)
         else:
-            signer(root, target)  # Tauri does not produce deb/DMG updater signatures.
+            signer(root, target)  # Sign manual packages explicitly, independent of bundler output.
         verify_signature(root, target, signature)
     if os.environ.get("SHACRAFT_UPDATER_TEST_BUILD") == "1":
         (destination / "CI_NOT_FOR_RELEASE.txt").write_text(

@@ -281,3 +281,27 @@ Linux draft/publish verifier rechecks their container headers and signatures.
 Header/metadata inspection is not a runtime, architecture-emulation or installer
 migration test. Synthetic header fixtures exercise these checks; they are never
 installed or executed.
+
+
+## Local package verification, 2026-09-09
+
+Application source `696c6b0` was built on Ubuntu 26.04 x86_64 using a disposable
+CI updater key and the visible test-build flag. Actual AppImage and deb packages
+passed the same collection checks used by the workflow: expected container,
+architecture/version where represented, and cryptographic updater signatures.
+The manual-package collector explicitly signs deb/DMG even when a CLI version
+also emits their signatures. No production package or release was signed.
+
+The actual AppImage was started with `--appimage-extract-and-run`, isolated XDG
+roots and a pending update targeting a different version. The native executable
+ran inside its own `APPDIR/usr/bin/shacraft-launcher`, referenced the expected
+`APPIMAGE`, held the instance OS lock and preserved the pending marker during
+startup and after termination. This checks native startup and the runtime binding;
+it does not establish visual/IPC behavior, installation, self-replacement or a
+successful updater restart. The deb was inspected, not installed.
+
+This local Ubuntu 26.04 build is not a compatibility result for Ubuntu 22.04 or
+other distributions. The four-platform GitHub matrix, real Windows/macOS
+installations, old-version migration and end-to-end update acceptance remain
+pending. Production signing credentials and release environments are not
+configured on GitHub, and no release has been published.

@@ -18,6 +18,9 @@
 - [ ] Cold install / repair / update / game exit на чистых Windows/Linux/macOS.
   Unit tests и web preview не заменяют эти прогоны.
 - [x] Native самообновление, русский UX, pinned updater key и защищённый release pipeline.
+- [x] Локальные AppImage/deb собраны на Ubuntu 26.04 с CI test key; подписи и
+  форматы проверены. Настоящий AppImage прошёл изолированный startup/lock/marker
+  smoke. Это не проверка установки, самообновления или совместимости Ubuntu 22.04.
 - [ ] Настроить защищённое GitHub environment/production secrets, опубликовать первый
   updater-релиз и проверить реальную замену приложения на каждой ОС. Подпись ОС и
   Apple notarization — отдельные настройки; CI test keys не предназначены игрокам.
