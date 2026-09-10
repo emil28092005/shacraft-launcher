@@ -7,12 +7,21 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 import publish_launcher_update as publisher
 
 MINISIGN = os.environ.get("SHACRAFT_TEST_MINISIGN", "minisign")
+
+
+def appimage_fixture():
+    header = bytearray(64)
+    header[:7] = b"\x7fELF\x02\x01\x01"
+    header[8:11] = b"AI\x02"
+    header[18:20] = b"\x3e\x00"
+    return bytes(header) + b"isolated format fixture; not a runnable launcher"
 
 
 class PolicyTests(unittest.TestCase):
@@ -24,10 +33,14 @@ class PolicyTests(unittest.TestCase):
 
     def test_platform_filename_policy(self):
         publisher.artifact_name("linux-x86_64", "ShaCraft.Launcher_0.1.3_amd64.AppImage")
+        publisher.artifact_name("linux-x86_64-appimage", "ShaCraft.Launcher_0.1.4_amd64.AppImage")
+        publisher.artifact_name("linux-x86_64-deb", "ShaCraft.Launcher_0.1.4_amd64.deb")
         for platform, filename in (
             ("linux-x86_64", "../bad.AppImage"), ("linux-x86_64", "foo.AppImage?secret"),
             ("linux-x86_64", "%2e%2e.AppImage"), ("linux-x86_64", "install.exe"),
             ("unknown", "test.AppImage"), ("darwin-aarch64", "installer.dmg"),
+            ("linux-x86_64", "install.deb"), ("linux-x86_64-appimage", "install.deb"),
+            ("linux-x86_64-deb", "install.AppImage"),
         ):
             with self.subTest(filename=filename), self.assertRaises(publisher.InvalidRelease):
                 publisher.artifact_name(platform, filename)
@@ -35,6 +48,20 @@ class PolicyTests(unittest.TestCase):
     def test_duplicate_json_keys_are_rejected(self):
         with self.assertRaises(publisher.InvalidRelease):
             publisher.strict_json(b'{"version":"0.1.3","version":"9.0.0"}')
+
+    def test_package_inspection_is_bounded_and_clears_environment(self):
+        with self.assertRaisesRegex(publisher.InvalidRelease, "output limit"):
+            publisher.bounded_command_output([sys.executable, "-c", "print('x' * 8192)"], limit=128)
+        with self.assertRaisesRegex(publisher.InvalidRelease, "timed out"):
+            publisher.bounded_command_output([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.1)
+        os.environ["SHACRAFT_INSPECTION_SECRET_TEST"] = "must-not-be-inherited"
+        try:
+            output = publisher.bounded_command_output([
+                sys.executable, "-c", "import os; print(os.getenv('SHACRAFT_INSPECTION_SECRET_TEST', 'clean'))",
+            ])
+        finally:
+            del os.environ["SHACRAFT_INSPECTION_SECRET_TEST"]
+        self.assertEqual(output, b"clean\n")
 
 
 @unittest.skipUnless(shutil.which(MINISIGN), "minisign CLI required for signature integration tests")
@@ -54,7 +81,7 @@ class SignatureTests(unittest.TestCase):
         release = self.downloads / "0.1.3"
         release.mkdir(parents=True)
         self.artifact = release / "fixture.AppImage"
-        self.artifact.write_bytes(b"isolated ShaCraft updater fixture; not an executable")
+        self.artifact.write_bytes(appimage_fixture())
         self.payload = {
             "version": "0.1.3", "notes": "Проверка обновления", "pub_date": "2026-09-10T00:00:00Z",
             "platforms": {"linux-x86_64": {
@@ -150,6 +177,110 @@ class SignatureTests(unittest.TestCase):
     def test_dry_run_verifies_without_creating_feed(self):
         self.publish(dry_run=True)
         self.assertFalse(self.output.exists())
+
+    def make_deb(self, package="sha-craft-launcher", version=None, architecture="amd64"):
+        if not Path(publisher.DPKG_DEB).is_file():
+            self.skipTest("dpkg-deb required for real deb validation")
+        version = version or self.payload["version"]
+        tree = self.root / "deb-tree"
+        control = tree / "DEBIAN"
+        control.mkdir(parents=True, exist_ok=True)
+        (control / "control").write_text(
+            f"Package: {package}\nVersion: {version}\nArchitecture: {architecture}\n"
+            "Maintainer: Test <test@example.invalid>\nDescription: isolated updater fixture\n",
+            encoding="ascii",
+        )
+        # Inspection must not execute a package script, even for an authenticated package.
+        script = control / "preinst"
+        script.write_text(f"#!/bin/sh\ntouch '{self.root / 'script-executed'}'\n", encoding="ascii")
+        script.chmod(0o755)
+        deb = self.artifact.with_name("fixture.deb")
+        subprocess.run(
+            [publisher.DPKG_DEB, "--build", "--root-owner-group", str(tree), str(deb)],
+            env=publisher.PACKAGE_TOOL_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=10, check=True,
+        )
+        self.payload["platforms"]["linux-x86_64-appimage"] = copy.deepcopy(
+            self.payload["platforms"]["linux-x86_64"]
+        )
+        self.payload["platforms"]["linux-x86_64-deb"] = {
+            "url": publisher.ORIGIN + self.payload["version"] + "/fixture.deb", "signature": self.sign(deb),
+        }
+        return deb
+
+    def test_format_aware_release_preserves_legacy_appimage_and_verifies_real_deb(self):
+        self.make_deb()
+        notes = self.root / "notes.txt"
+        notes.write_text(self.payload["notes"], encoding="utf-8")
+        args = argparse.Namespace(
+            version="0.1.3", artifact=[
+                "linux-x86_64=fixture.AppImage", "linux-x86_64-appimage=fixture.AppImage",
+                "linux-x86_64-deb=fixture.deb",
+            ], downloads_root=self.downloads, notes_file=notes, payload=self.payload_path,
+            pub_date=self.payload["pub_date"], minisign=MINISIGN,
+        )
+        self.assertEqual(publisher.prepare(args, self.public_key), self.payload)
+        self.publish()
+        feed = publisher.verified_previous(self.output.read_bytes(), self.public_key, MINISIGN)
+        self.assertEqual(feed["platforms"]["linux-x86_64"], feed["platforms"]["linux-x86_64-appimage"])
+        self.assertEqual(set(feed["platforms"]), {"linux-x86_64", "linux-x86_64-appimage", "linux-x86_64-deb"})
+        self.assertFalse((self.root / "script-executed").exists())
+
+    def test_authenticated_legacy_feed_advances_to_format_aware_release(self):
+        self.publish()
+        old_release = self.artifact.parent
+        old_bytes = self.artifact.read_bytes()
+        new_release = self.downloads / "0.1.4"
+        shutil.copytree(old_release, new_release)
+        self.artifact = new_release / self.artifact.name
+        self.payload["version"] = "0.1.4"
+        self.payload["platforms"]["linux-x86_64"]["url"] = publisher.ORIGIN + "0.1.4/fixture.AppImage"
+        self.make_deb()
+        self.publish()
+        feed = publisher.verified_previous(self.output.read_bytes(), self.public_key, MINISIGN)
+        self.assertEqual(feed["version"], "0.1.4")
+        self.assertEqual(len(feed["platforms"]), 3)
+        self.assertEqual((old_release / self.artifact.name).read_bytes(), old_bytes)
+
+    def test_linux_format_release_cannot_drop_or_repoint_legacy_entry(self):
+        self.make_deb()
+        for key in ("linux-x86_64", "linux-x86_64-appimage"):
+            payload = copy.deepcopy(self.payload)
+            del payload["platforms"][key]
+            with self.subTest(key=key), self.assertRaisesRegex(publisher.InvalidRelease, "identical legacy"):
+                self.publish(payload)
+        payload = copy.deepcopy(self.payload)
+        payload["platforms"]["linux-x86_64-appimage"]["url"] = publisher.ORIGIN + "0.1.3/other.AppImage"
+        with self.assertRaisesRegex(publisher.InvalidRelease, "identical legacy"):
+            self.publish(payload)
+        self.assertFalse(self.output.exists())
+
+    def test_deb_identity_must_match_application_signed_version_and_architecture(self):
+        for changes in ({"package": "another-launcher"}, {"version": "9.0.0"}, {"architecture": "arm64"}):
+            with self.subTest(changes=changes):
+                self.make_deb(**changes)
+                with self.assertRaisesRegex(publisher.InvalidRelease, "deb identity"):
+                    self.publish()
+                self.assertFalse(self.output.exists())
+
+    def test_signed_invalid_deb_is_rejected_without_running_package_scripts(self):
+        deb = self.make_deb()
+        deb.write_bytes(b"not a Debian archive")
+        self.payload["platforms"]["linux-x86_64-deb"]["signature"] = self.sign(deb)
+        with self.assertRaisesRegex(publisher.InvalidRelease, "package inspection failed"):
+            self.publish()
+        self.assertFalse((self.root / "script-executed").exists())
+        self.assertFalse(self.output.exists())
+
+    def test_signed_wrong_appimage_format_is_rejected(self):
+        for changed_slice, replacement in ((slice(8, 11), b"AI\x01"), (slice(18, 20), b"\xb7\x00")):
+            malformed = bytearray(appimage_fixture())
+            malformed[changed_slice] = replacement
+            self.artifact.write_bytes(malformed)
+            self.payload["platforms"]["linux-x86_64"]["signature"] = self.sign(self.artifact)
+            with self.subTest(replacement=replacement), self.assertRaisesRegex(publisher.InvalidRelease, "type-2 x86_64"):
+                self.publish()
+            self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

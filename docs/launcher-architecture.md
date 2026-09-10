@@ -23,7 +23,8 @@ read-only `https://shacraft.ru/api/online/aoc` endpoint. It is display-only:
 the result never controls files, versions, URLs, or the launch command.
 
 Version 0.1.3 adds signed application updates, separate from modpack sync.
-Linux AppImage replacement is supported; the first upgrade from 0.1.2 is manual.
+Version 0.1.4 adds installed deb updates with system administrator confirmation.
+The first AppImage upgrade from 0.1.2 and deb upgrade from 0.1.3 are manual.
 Windows/macOS packages still require publication and actual installation tests.
 Not yet implemented: a user-selectable profile directory and a "reset managed
 files only" recovery action. OS code signing/notarization is separate from the
@@ -195,6 +196,24 @@ same-directory temporary file, signature verification, preserved permissions,
 atomic rename and file/directory fsync. Windows/macOS retain Tauri's platform
 installers. Unsupported Linux formats show manual installation instructions.
 
+For installed deb packages, 0.1.4 selects only `linux-x86_64-deb`. The feed also
+retains the identical legacy `linux-x86_64` and explicit `linux-x86_64-appimage`
+AppImage entries so installed 0.1.3 readers remain compatible. Remote metadata
+cannot switch a deb installation into an AppImage installation.
+
+`deb_updater.rs` checks root ownership of the installed executable and its
+parents and dpkg's ownership/version record. One `pkexec` invocation starts an
+early non-GUI mode of `/usr/bin/shacraft-launcher`; no password is collected by
+the launcher and no fallback prompt runs after cancellation. Bounded stdin
+framing carries the signed envelope and package bytes, never user paths.
+The helper authenticates both again as root, checks exact package identity
+`sha-craft-launcher`, architecture and version, stages the package under a
+root-only temporary directory and invokes the fixed dpkg installer. An explicit
+`--refuse-downgrade` protects against another installation winning the version
+race. Failed/partial package transactions require honest system-package recovery;
+they are not reported as completed or automatically retried. Restart launches
+the fixed installed executable even after dpkg replaces the running inode.
+
 The native updater holds installation, account and game permits while installing
 and until restart. The game permit remains held until the launched Java child
 exits. These guards cover this launcher process, not other launcher instances.
@@ -248,3 +267,19 @@ The original source AppImage was retained. The installed 0.1.3 AppImage was
 then started from `~/Applications` and its captured runtime paths verified.
 This is not a full GUI update/restart cycle or a Windows/macOS installation test.
 The Linux build host remains Ubuntu 26.04.
+
+The 0.1.4 checkpoint passed 84 native tests (6 ignored), 32 UI tests and 18
+publisher tests; 12 browser scenarios use mocked IPC. In a disposable Ubuntu
+26.04 Docker container without network or production mounts, the actual signed
+deb helper passed 10 scenarios: unprivileged invocation, truncated/trailing
+input, damaged metadata/package, dpkg lock, unsafe temporary directory,
+successful installation, replay and downgrade refusal. The fixture installed
+the genuine old 0.1.3 package and bootstrapped the new verifier binary over its
+package record; it then installed the genuine signed 0.1.4. It did not relabel
+signed versions. Dpkg reported 0.1.4 and a fixture profile marker survived.
+This tests the elevated helper and dpkg, not a real desktop PolicyKit dialog.
+Cancellation/error rendering is covered by unit/browser scenarios. Published
+metadata and deb bytes match the locally verified files; both website download
+buttons target 0.1.4. No user host package installation was performed for QA.
+The live native AppImage smoke also passed against the published 0.1.4 feed,
+including corruption rejection and replacement of only a temporary source copy.

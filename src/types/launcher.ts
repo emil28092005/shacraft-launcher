@@ -84,6 +84,7 @@ export interface GameExitedPayload {
 export interface LauncherUpdateStatus {
   currentVersion: string
   supported: boolean
+  installationKind?: 'appimage' | 'deb' | 'other'
   reason?: string | null
   version?: string | null
   notes?: string | null

@@ -15,12 +15,20 @@ use tauri_plugin_updater::{Update, UpdaterBuilder, UpdaterExt};
 use url::Url;
 
 pub(crate) const UPDATE_ENDPOINT: &str = "https://shacraft.ru/launcher/updates/stable.json";
-const MAX_METADATA_BYTES: usize = 192 * 1024;
+pub(crate) const MAX_METADATA_BYTES: usize = 192 * 1024;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
-const MAX_ARTIFACT_BYTES: usize = 256 * 1024 * 1024;
+pub(crate) const MAX_ARTIFACT_BYTES: usize = 256 * 1024 * 1024;
 const BAD_METADATA: &str =
     "Не удалось подтвердить подлинность сведений об обновлении. Повторите проверку позже.";
 const BAD_SIGNATURE: &str = "Подпись обновления не прошла проверку. Установка отменена.";
+
+#[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum InstallationKind {
+    Appimage,
+    Deb,
+    Other,
+}
 
 #[derive(Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -53,6 +61,7 @@ pub(crate) struct LauncherUpdater {
 pub(crate) struct UpdateStatus {
     pub current_version: String,
     pub supported: bool,
+    pub installation_kind: InstallationKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub stage: Stage,
@@ -81,6 +90,7 @@ impl LauncherUpdater {
         Ok(UpdateStatus {
             current_version: app.package_info().version.to_string(),
             supported: reason.is_none(),
+            installation_kind: installation_kind(app),
             reason,
             stage: state.stage,
             version: state
@@ -103,28 +113,39 @@ impl LauncherUpdater {
     }
 }
 
-pub(crate) fn unsupported_reason<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+pub(crate) fn installation_kind<R: Runtime>(app: &AppHandle<R>) -> InstallationKind {
     #[cfg(target_os = "linux")]
     {
         let env = app.env();
-        let valid = match (
+        if let (Some(image), Some(directory), Ok(executable)) = (
             env.appimage.as_ref(),
             env.appdir.as_ref(),
             std::env::current_exe(),
         ) {
-            (Some(image), Some(directory), Ok(executable)) => linux_appimage_supported(
-                std::path::Path::new(image),
-                std::path::Path::new(directory),
-                &executable,
-            ),
-            _ => false,
-        };
-        if !valid {
-            return Some("Автообновление в Linux доступно в AppImage. Установите AppImage с shacraft.ru и запускайте его.".into());
+            if linux_appimage_supported(image.as_ref(), directory.as_ref(), &executable) {
+                return InstallationKind::Appimage;
+            }
+        }
+        if crate::deb_updater::installed_binary_supported() {
+            return InstallationKind::Deb;
         }
     }
+    let _ = app;
+    InstallationKind::Other
+}
+
+pub(crate) fn unsupported_reason<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    match installation_kind(app) {
+        InstallationKind::Appimage => return None,
+        InstallationKind::Deb => return crate::deb_updater::unsupported_reason(),
+        InstallationKind::Other => return Some("Для автообновления установите deb-пакет или запустите AppImage с shacraft.ru/help#launcher.".into()),
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     return Some("Для этой платформы доступна только ручная установка обновлений.".into());
+    #[cfg(not(target_os = "linux"))]
     None
 }
 
@@ -169,6 +190,9 @@ pub(crate) fn installation_path<R: Runtime>(
 ) -> Result<Option<std::path::PathBuf>, String> {
     #[cfg(target_os = "linux")]
     {
+        if installation_kind(app) == InstallationKind::Deb {
+            return Ok(None);
+        }
         let image = app
             .env()
             .appimage
@@ -250,7 +274,7 @@ async fn bounded_response(
 /// Same Minisign format and verification semantics as Tauri's updater. The
 /// signed metadata and artifact each need a valid signature under the embedded
 /// release key. A signed old artifact cannot be labelled as a new version.
-fn verify_signature(
+pub(crate) fn verify_signature(
     bytes: &[u8],
     encoded_signature: &str,
     encoded_key: &str,
@@ -271,7 +295,7 @@ fn verify_signature(
         .map_err(|_| BAD_SIGNATURE.into())
 }
 
-fn verified_metadata(raw: &Value, key: &str) -> Result<Value, String> {
+pub(crate) fn verified_metadata(raw: &Value, key: &str) -> Result<Value, String> {
     let object = raw.as_object().ok_or(BAD_METADATA)?;
     if object.len() != 6 {
         return Err(BAD_METADATA.into());
@@ -305,7 +329,7 @@ fn verified_metadata(raw: &Value, key: &str) -> Result<Value, String> {
     Ok(parsed)
 }
 
-fn newer_version(metadata: &Value, current: &str) -> Result<bool, String> {
+pub(crate) fn newer_version(metadata: &Value, current: &str) -> Result<bool, String> {
     let announced = metadata
         .get("version")
         .and_then(Value::as_str)
@@ -319,7 +343,7 @@ fn newer_version(metadata: &Value, current: &str) -> Result<bool, String> {
     Ok(version > current)
 }
 
-fn require_platform(metadata: &Value) -> Result<(), String> {
+fn require_platform(metadata: &Value, kind: InstallationKind) -> Result<String, String> {
     let os = if cfg!(target_os = "macos") {
         "darwin"
     } else {
@@ -330,17 +354,34 @@ fn require_platform(metadata: &Value) -> Result<(), String> {
         .get("platforms")
         .and_then(Value::as_object)
         .ok_or(BAD_METADATA)?;
-    let available = platforms.contains_key(&target)
-        || ["appimage", "nsis", "msi", "app"]
+    #[cfg(target_os = "linux")]
+    let targets = match kind {
+        InstallationKind::Deb => vec![format!("{target}-deb")],
+        InstallationKind::Appimage => vec![format!("{target}-appimage"), target],
+        InstallationKind::Other => {
+            return Err("Формат установленного лаунчера не поддерживает обновление.".into())
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let targets = {
+        let _ = kind;
+        ["nsis", "msi", "app"]
             .iter()
-            .any(|bundle| platforms.contains_key(&format!("{target}-{bundle}")));
-    if !available {
-        return Err("Обновление для вашей платформы пока не опубликовано.".into());
-    }
-    Ok(())
+            .map(|bundle| format!("{target}-{bundle}"))
+            .chain(std::iter::once(target))
+            .collect::<Vec<_>>()
+    };
+    targets
+        .into_iter()
+        .find(|target| platforms.contains_key(target))
+        .ok_or_else(|| "Обновление для вашего формата установки пока не опубликовано.".into())
 }
 
-fn validate_download_url(url: &Url, version: &str) -> Result<(), String> {
+pub(crate) fn validate_download_url(
+    url: &Url,
+    version: &str,
+    kind: InstallationKind,
+) -> Result<(), String> {
     let prefix = format!("/downloads/shacraft-launcher/{version}/");
     let filename = url.path().strip_prefix(&prefix).ok_or(BAD_METADATA)?;
     if url.scheme() != "https"
@@ -359,7 +400,11 @@ fn validate_download_url(url: &Url, version: &str) -> Result<(), String> {
         return Err(BAD_METADATA.into());
     }
     let correct_extension = if cfg!(target_os = "linux") {
-        filename.ends_with(".AppImage")
+        match kind {
+            InstallationKind::Appimage => filename.ends_with(".AppImage"),
+            InstallationKind::Deb => filename.ends_with(".deb"),
+            InstallationKind::Other => false,
+        }
     } else if cfg!(target_os = "macos") {
         filename.ends_with(".app.tar.gz")
     } else if cfg!(target_os = "windows") {
@@ -373,6 +418,18 @@ fn validate_download_url(url: &Url, version: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn candidate_kind(update: &Update) -> InstallationKind {
+    if cfg!(target_os = "linux") {
+        if update.target == format!("linux-{}-deb", std::env::consts::ARCH) {
+            InstallationKind::Deb
+        } else {
+            InstallationKind::Appimage
+        }
+    } else {
+        InstallationKind::Other
+    }
+}
+
 /// Fetch and authenticate a bounded static manifest before asking the vendored
 /// upstream plugin's small offline constructor to create an Update. Its normal
 /// HTTP check is intentionally unused because it buffers unbounded JSON.
@@ -380,6 +437,7 @@ pub(crate) async fn check_candidate(
     builder: UpdaterBuilder,
     key: &str,
     current: &str,
+    kind: InstallationKind,
 ) -> Result<Option<Update>, String> {
     let response = http_client(Duration::from_secs(20))?
         .get(UPDATE_ENDPOINT)
@@ -391,10 +449,14 @@ pub(crate) async fn check_candidate(
     let bytes = bounded_response(response, MAX_METADATA_BYTES, |_, _| {}).await?;
     let raw: Value = serde_json::from_slice(&bytes).map_err(|_| BAD_METADATA)?;
     let metadata = verified_metadata(&raw, key)?;
-    require_platform(&metadata)?;
+    let target = require_platform(&metadata, kind)?;
     if !newer_version(&metadata, current)? {
         return Ok(None);
     }
+    #[cfg(target_os = "linux")]
+    let builder = builder.target(target);
+    #[cfg(not(target_os = "linux"))]
+    let _ = target;
     let update = builder
         .build()
         .map_err(updater_error)?
@@ -409,7 +471,11 @@ pub(crate) async fn check_candidate(
     }
     // Retain the exact signed envelope with the native-only candidate.
     verified_metadata(&update.raw_json, key)?;
-    validate_download_url(&update.download_url, &update.version)?;
+    validate_download_url(
+        &update.download_url,
+        &update.version,
+        candidate_kind(&update),
+    )?;
     Ok(Some(update))
 }
 
@@ -418,7 +484,11 @@ pub(crate) async fn download_verified(
     key: &str,
     progress: impl FnMut(u64, Option<u64>),
 ) -> Result<Vec<u8>, String> {
-    validate_download_url(&update.download_url, &update.version)?;
+    validate_download_url(
+        &update.download_url,
+        &update.version,
+        candidate_kind(update),
+    )?;
     verified_metadata(&update.raw_json, key)?;
     let response = http_client(Duration::from_secs(600))?
         .get(update.download_url.clone())
@@ -441,10 +511,17 @@ pub(crate) fn install_verified(
     key: &str,
     destination: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    validate_download_url(&update.download_url, &update.version)?;
+    validate_download_url(
+        &update.download_url,
+        &update.version,
+        candidate_kind(update),
+    )?;
     verify_signature(bytes, &update.signature, key)?;
     #[cfg(target_os = "linux")]
     {
+        if candidate_kind(update) == InstallationKind::Deb {
+            return crate::deb_updater::install(update, bytes);
+        }
         let destination = destination.ok_or("Файл AppImage недоступен.")?;
         install_appimage_atomic(destination, bytes).map_err(|_| {
             "Не удалось заменить AppImage. Проверьте свободное место и права на папку лаунчера."
@@ -522,7 +599,12 @@ mod tests {
 
     #[test]
     fn download_policy_pins_origin_version_plain_path_and_package_type() {
-        assert!(validate_download_url(&Url::parse(artifact_url()).unwrap(), "0.2.0").is_ok());
+        assert!(validate_download_url(
+            &Url::parse(artifact_url()).unwrap(),
+            "0.2.0",
+            InstallationKind::Appimage
+        )
+        .is_ok());
         for value in [
             artifact_url().replace("https:", "http:"),
             artifact_url().replace("shacraft.ru/", "evil.example/"),
@@ -536,10 +618,50 @@ mod tests {
             format!("{}.sh", artifact_url()),
         ] {
             assert!(
-                validate_download_url(&Url::parse(&value).unwrap(), "0.2.0").is_err(),
+                validate_download_url(
+                    &Url::parse(&value).unwrap(),
+                    "0.2.0",
+                    InstallationKind::Appimage
+                )
+                .is_err(),
                 "{value}"
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_selects_package_family_without_deb_fallback() {
+        let base = format!("linux-{}", std::env::consts::ARCH);
+        let legacy = serde_json::json!({"platforms": {base.clone(): {}}});
+        assert_eq!(
+            require_platform(&legacy, InstallationKind::Appimage).unwrap(),
+            base
+        );
+        assert!(require_platform(&legacy, InstallationKind::Deb).is_err());
+        let exact_image = format!("{base}-appimage");
+        let exact_deb = format!("{base}-deb");
+        let all = serde_json::json!({"platforms": {base.clone(): {}, exact_image.clone(): {}, exact_deb.clone(): {}}});
+        assert_eq!(
+            require_platform(&all, InstallationKind::Appimage).unwrap(),
+            exact_image
+        );
+        assert_eq!(
+            require_platform(&all, InstallationKind::Deb).unwrap(),
+            exact_deb
+        );
+        let deb = Url::parse(
+            "https://shacraft.ru/downloads/shacraft-launcher/0.2.0/ShaCraft_0.2.0_amd64.deb",
+        )
+        .unwrap();
+        assert!(validate_download_url(&deb, "0.2.0", InstallationKind::Deb).is_ok());
+        assert!(validate_download_url(&deb, "0.2.0", InstallationKind::Appimage).is_err());
+        assert!(validate_download_url(
+            &Url::parse(artifact_url()).unwrap(),
+            "0.2.0",
+            InstallationKind::Deb
+        )
+        .is_err());
     }
 
     #[test]
@@ -621,7 +743,11 @@ mod tests {
 
     #[test]
     fn unavailable_platform_is_not_reported_as_latest() {
-        assert!(require_platform(&serde_json::json!({"platforms":{}})).is_err());
+        assert!(require_platform(
+            &serde_json::json!({"platforms":{}}),
+            InstallationKind::Appimage
+        )
+        .is_err());
     }
 
     #[cfg(target_os = "linux")]
@@ -698,7 +824,7 @@ mod tests {
             .unwrap()
             .executable_path(&destination);
         tauri::async_runtime::block_on(async {
-            let update = check_candidate(builder, &key, "0.1.2")
+            let update = check_candidate(builder, &key, "0.1.2", InstallationKind::Appimage)
                 .await
                 .unwrap()
                 .expect("newer published version");

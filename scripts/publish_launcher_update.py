@@ -15,13 +15,17 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import stat
 import subprocess
 import tempfile
+import time
 
 ORIGIN = "https://shacraft.ru/downloads/shacraft-launcher/"
 PLATFORMS = {
     "linux-x86_64": (".AppImage",),
+    "linux-x86_64-appimage": (".AppImage",),
+    "linux-x86_64-deb": (".deb",),
     "windows-x86_64": (".exe", ".msi"),
     "darwin-x86_64": (".app.tar.gz",),
     "darwin-aarch64": (".app.tar.gz",),
@@ -29,6 +33,9 @@ PLATFORMS = {
 FIELDS = {"version", "notes", "pub_date", "platforms"}
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 MAX_METADATA_BYTES = 64 * 1024
+DEB_PACKAGE = "sha-craft-launcher"
+DPKG_DEB = "/usr/bin/dpkg-deb"
+PACKAGE_TOOL_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
 
 
 class InvalidRelease(ValueError):
@@ -110,6 +117,67 @@ def verify_signature(artifact, signature, public_key, minisign):
             raise InvalidRelease("signature verification failed")
 
 
+def bounded_command_output(command, limit=4096, timeout=10):
+    """Run a fixed package inspector without shell, inherited hooks or unbounded output."""
+    process = None
+    try:
+        process = subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, env=PACKAGE_TOOL_ENV,
+        )
+        deadline = time.monotonic() + timeout
+        output = bytearray()
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    raise InvalidRelease("package inspection timed out")
+                chunk = os.read(process.stdout.fileno(), min(4096, limit + 1 - len(output)))
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if len(output) > limit:
+                    raise InvalidRelease("package inspection exceeds output limit")
+        returncode = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        if returncode != 0:
+            raise InvalidRelease("package inspection failed")
+        return bytes(output)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise InvalidRelease("package inspection could not run") from exc
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            process.stdout.close()
+
+
+def validate_artifact_format(platform, path, version):
+    if platform in {"linux-x86_64", "linux-x86_64-appimage"}:
+        with path.open("rb") as stream:
+            header = stream.read(64)
+        if (len(header) < 64 or header[:7] != b"\x7fELF\x02\x01\x01"
+                or header[8:11] != b"AI\x02" or header[18:20] != b"\x3e\x00"):
+            raise InvalidRelease("AppImage must be a type-2 x86_64 ELF image")
+    elif platform == "linux-x86_64-deb":
+        # Inspect only authenticated package bytes; dpkg-deb does not run maintainer scripts.
+        output = bounded_command_output([
+            DPKG_DEB, "--showformat=${Package}\n${Version}\n${Architecture}\n", "--show", str(path),
+        ])
+        expected = f"{DEB_PACKAGE}\n{version}\namd64\n".encode("ascii")
+        if output != expected:
+            raise InvalidRelease("deb identity must match sha-craft-launcher, signed version and amd64")
+
+
+def validate_linux_aliases(platforms):
+    if "linux-x86_64-appimage" in platforms or "linux-x86_64-deb" in platforms:
+        legacy = platforms.get("linux-x86_64")
+        exact = platforms.get("linux-x86_64-appimage")
+        if legacy is None or exact is None or legacy != exact:
+            raise InvalidRelease("format-aware Linux releases require identical legacy and AppImage entries")
+
+
 def strict_json(data):
     def unique(pairs):
         result = {}
@@ -163,6 +231,7 @@ def validate_payload(payload, downloads_root, public_key, minisign):
     platforms = payload["platforms"]
     if not isinstance(platforms, dict) or not platforms:
         raise InvalidRelease("at least one signed updater artifact is required")
+    validate_linux_aliases(platforms)
     release_dir = downloads_root.resolve() / payload["version"]
     if release_dir.is_symlink() or not release_dir.is_dir():
         raise InvalidRelease("release directory must be an existing real directory")
@@ -177,6 +246,7 @@ def validate_payload(payload, downloads_root, public_key, minisign):
         local_path = release_dir / filename
         before = regular_file(local_path, MAX_ARTIFACT_BYTES)
         verify_signature(local_path, artifact["signature"], public_key, minisign)
+        validate_artifact_format(platform, local_path, payload["version"])
         after = regular_file(local_path, MAX_ARTIFACT_BYTES)
         if (before.st_ino, before.st_size, before.st_mtime_ns) != (
             after.st_ino, after.st_size, after.st_mtime_ns

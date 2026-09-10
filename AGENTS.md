@@ -72,8 +72,21 @@ payload are in `/root/shacraft` on the ShaCraft host; see
   Downloads require HTTPS without redirects on exact `shacraft.ru`, below
   `/downloads/shacraft-launcher/<signed-version>/`, and are bounded to 256 MiB.
   Stable versions must increase. The native layer owns every candidate.
-- Linux self-update is supported for AppImage only. Preserve executable
-  permissions and use same-directory atomic replacement after verification.
+- Linux self-update supports AppImage and an installed `sha-craft-launcher`
+  deb. AppImage preserves executable permissions and uses same-directory
+  atomic replacement after verification. Deb selects only the signed
+  `linux-x86_64-deb` entry; retain legacy `linux-x86_64` AppImage metadata for
+  installed 0.1.3 clients. Never silently switch installation formats.
+- Deb elevation uses only `/usr/bin/pkexec --disable-internal-agent` and the
+  root-owned installed `/usr/bin/shacraft-launcher --shacraft-install-deb`.
+  This early helper mode never starts GTK/Tauri or account/network code. It
+  receives bounded metadata/package bytes over stdin, not paths or commands,
+  and re-verifies both signatures with the embedded key as root. Before the
+  fixed dpkg installation, require exact package name, architecture and signed
+  version, root-only staging and monotonic installed-package version; pass
+  `--refuse-downgrade` to dpkg to close concurrent-update races. No system
+  password collection, sudo fallback or permissive polkit policy is allowed.
+  Cancellation, denied authorization and a busy package manager stay distinct.
   Windows/macOS use the pinned Tauri installer implementation; the vendored
   updater change only exposes construction from already verified metadata to
   avoid a second, unbounded remote JSON request. See its patch notes.
@@ -122,6 +135,8 @@ payload are in `/root/shacraft` on the ShaCraft host; see
     must remain outside its argument substitution and JVM argfile paths.
   - `updater.rs`, `commands/updater.rs` — authenticated release metadata,
     bounded package download, platform installation and guarded restart.
+  - `deb_updater.rs` — installed-package checks, one system authentication
+    prompt and the bounded, signature-verifying non-GUI root helper.
 - `src-tauri/src/settings.rs` — durable local preferences; maintain backward
   compatibility with already-written JSON.
 - `docs/manifest-v1.md` — signed manifest envelope and payload contract

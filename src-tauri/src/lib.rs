@@ -1,4 +1,6 @@
 mod admission;
+#[cfg(target_os = "linux")]
+mod deb_updater;
 mod download;
 mod java;
 mod launch;
@@ -20,6 +22,10 @@ mod commands;
 mod operations;
 
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    if let Some(code) = deb_updater::run_helper_if_requested() {
+        std::process::exit(code);
+    }
     use tauri::Manager;
     tauri::Builder::default()
         .manage(operations::LauncherOperations::default())

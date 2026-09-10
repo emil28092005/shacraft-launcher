@@ -37,6 +37,7 @@ pub(crate) async fn check_launcher_update(
                 updater::trusted_builder(&app)?,
                 &key,
                 &app.package_info().version.to_string(),
+                updater::installation_kind(&app),
             )
             .await
         }
@@ -189,6 +190,14 @@ pub(crate) fn restart_launcher_after_update(
         if state.stage != Stage::Ready || state.restart_permits.is_none() {
             return Err("Сначала установите обновление лаунчера.".into());
         }
+    }
+    #[cfg(target_os = "linux")]
+    if updater::installation_kind(&app) == updater::InstallationKind::Deb
+        || crate::deb_updater::is_deleted_installed_binary()
+    {
+        crate::deb_updater::restart()?;
+        app.exit(0);
+        return Ok(());
     }
     app.restart()
 }
