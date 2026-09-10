@@ -368,7 +368,7 @@ fn require_platform(metadata: &Value, kind: InstallationKind) -> Result<String, 
         ["nsis", "msi", "app"]
             .iter()
             .map(|bundle| format!("{target}-{bundle}"))
-            .chain(std::iter::once(target))
+            .chain(std::iter::once(target.clone()))
             .collect::<Vec<_>>()
     };
     targets
