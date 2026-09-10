@@ -202,3 +202,18 @@ server. Windows installers have no Authenticode signature; macOS is not Apple
 notarized. Native CI tests and packaging do not certify full Minecraft installs
 or desktop updater/restart behavior on Windows/macOS. Older unsupported clients
 need a manual installation of the current release. Previous releases immutable.
+
+
+## Admission client menu 0.1.1 (2026-09-11)
+
+The signed Aeronautics payload now contains admission mod 0.1.1 at the existing
+managed path `mods/shacraft-admission-0.1.0.jar` to prevent duplicate mod IDs on
+upgrade. SHA-256: `faa9ae13cb0f2d93c03dae26ab36ae20d3fb6b66c89c09254b16808d6b183f89`.
+From the title screen (and vanilla safety acknowledgement), Multiplayer connects
+to fixed `135.106.154.86:25567`. Cancel/errors return to TitleScreen; transitions
+from other screens do not auto-connect. Client-only registration, protocol 1 and
+one-use admission remain unchanged. Running game server was not restarted.
+Linux Java 21 build and 8 mod tests pass. An opt-in native live test verifies
+signed-manifest retrieval and download/repair/restoration of the admission jar
+only in a temporary directory. Mac 0.1.5 connection failure remains unclassified
+pending exact error/log; this is not a verified macOS fix or desktop UI test.

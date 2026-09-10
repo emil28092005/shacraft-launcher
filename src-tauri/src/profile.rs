@@ -185,6 +185,41 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    #[test]
+    #[ignore = "downloads the public signed admission mod into a temporary directory"]
+    fn live_admission_mod_is_restored_when_missing_or_corrupt() {
+        let mut manifest = crate::remote::fetch_manifest("aeronautics").unwrap();
+        manifest.files.retain(|file| {
+            file.path.starts_with("mods/shacraft-admission") && file.path.ends_with(".jar")
+        });
+        assert_eq!(
+            manifest.files.len(),
+            1,
+            "exactly one admission mod is required"
+        );
+        assert!(matches!(manifest.files[0].policy, FilePolicy::Managed));
+        let root = std::env::temp_dir().join(format!(
+            "shacraft-live-admission-{}-{}",
+            process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert_eq!(inspect(&root, &manifest).unwrap().missing_files, 1);
+        super::sync(&root, &manifest).unwrap();
+        assert!(inspect(&root, &manifest).unwrap().up_to_date);
+        let target = root.join(&manifest.files[0].path);
+        fs::write(&target, b"corrupt fixture").unwrap();
+        assert!(!inspect(&root, &manifest).unwrap().up_to_date);
+        super::sync(&root, &manifest).unwrap();
+        assert!(inspect(&root, &manifest).unwrap().up_to_date);
+        fs::remove_file(&target).unwrap();
+        super::sync(&root, &manifest).unwrap();
+        assert!(inspect(&root, &manifest).unwrap().up_to_date);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn manifest(hash: String, size: u64) -> Manifest {
         Manifest {
             schema_version: 1,
