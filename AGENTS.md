@@ -5,8 +5,8 @@
 Cross-platform desktop launcher for the ShaCraft Minecraft network. It is a
 Tauri 2 application: React/Vite is the UI and Rust owns all filesystem,
 network and process-adjacent work. Profiles are **Aeronautics** (Minecraft 1.21.1, NeoForge 21.1.248, Java 21)
-and **Minigames** (Minecraft 26.2, Fabric 0.19.5, Java 25). See the staged
-Minigames integration record below; published launcher status is separate.
+and **Minigames** (Minecraft 26.2, Fabric 0.19.5, Java 25). See the Minigames
+integration record below and `docs/release-0.1.6.md` for publication evidence.
 
 This repository owns the launcher only. The server-side API and published
 payload are in `/root/shacraft` on the ShaCraft host; see
@@ -220,7 +220,7 @@ signed-manifest retrieval and download/repair/restoration of the admission jar
 only in a temporary directory. Mac 0.1.5 connection failure remains unclassified
 pending exact error/log; this is not a verified macOS fix or desktop UI test.
 
-## Minigames integration (2026-09-13, staged)
+## Minigames integration (2026-09-13, published in 0.1.6)
 
 - Native profile mapping is fixed: aeronautics → aoc; minigames → minigames.
   Both display/claim the canonical existing aoc nickname. The backend enforces
@@ -245,3 +245,13 @@ pending exact error/log; this is not a verified macOS fix or desktop UI test.
 - Production updater publication requires a separately built, monotonically
   newer launcher release and existing operator signatures. Source tests or a
   client jar alone do not update installed 0.1.5 launchers.
+
+Launcher 0.1.6 was built from `799fa692` on `codex/launcher-updater`; divergent
+`main` remains unchanged. All four native CI builds, UI/native checks and 18
+publisher signature tests pass. The unchanged Fabric companion completed a
+real Minecraft 26.2 → Paper configuration handshake with a synthetic account;
+its CI artifact is byte-identical. All eight public packages and the stable
+feed were signed with the existing local updater key and verified through
+public HTTPS downloads. See `docs/release-0.1.6.md` and its committed receipt.
+This records successful release/admission verification, not a Windows/macOS
+cold install or OS signing/notarization certification.

@@ -1,4 +1,4 @@
-# Launcher 0.1.6 candidate
+# Launcher 0.1.6 release
 
 Adds a separate Minigames profile (Minecraft 26.2 / Fabric 0.19.5 / Java 25)
 while keeping Aeronautics and its installed profile intact. Both use the
@@ -10,9 +10,21 @@ Local checks: 87 native tests, 33 UI tests, TypeScript/Vite, three Java client
 proof tests, an official Fabric metadata resolution check and the Linux native
 release build. The [real Fabric/Paper smoke](verification/minigames-fabric-2026-09-13.json)
 passed with a synthetic account: the unchanged production companion entered
-the lobby and the backend consumed its Minigames ticket. Cross-platform CI
-and production rollout results must be recorded before calling this published. No updater feed has
-been changed by preparing this candidate.
+the lobby and the backend consumed its Minigames ticket. Published on 2026-09-13:
+all four cross-platform jobs succeeded in [build run 34778218510](https://github.com/emil28092005/shacraft-launcher/actions/runs/34778218510)
+at runtime source `799fa692ef5e775f0044fe300f65fd4564771d47`.
+[Checks run 34778334417](https://github.com/emil28092005/shacraft-launcher/actions/runs/34778334417)
+passed at `5b741771b4668a834a2c5b757379340f11b8ae3a`; the only difference is the
+CI job that runs all 18 publisher signature tests on Ubuntu 24.04. The CI Fabric
+jar exactly matches the one used by the real client smoke.
+
+All eight packages were signed locally, verified again on the server, and
+published after a successful dry-run. Full public HTTPS downloads match the
+recorded SHA-256 values; package signatures and the public feed signature pass.
+The feed payload equals the locally signed canonical bytes. See the
+[publication receipt](verification/launcher-release-0.1.6.json). The previous
+0.1.5 feed was backed up; its packages remain unchanged. The private key stayed
+on the operator workstation.
 
 ## Build contract
 
@@ -23,7 +35,7 @@ Push the reviewed commit to the production branch, then dispatch
 `gh workflow run build.yml --ref codex/launcher-updater --repo emil28092005/shacraft-launcher`.
 The check workflow runs on branch pushes. Verify each run's head SHA equals the
 reviewed commit before downloading artifacts. A main push also triggers the
-build matrix, but is not the publication path for this candidate.
+build matrix, but was not the publication path for this release.
 CI publishes unsigned artifacts named:
 
 - `shacraft-launcher-linux-x64`: AppImage and deb.

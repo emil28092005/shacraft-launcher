@@ -1,0 +1,84 @@
+{
+  "recorded_at": "2026-09-13T20:03:46.913196+00:00",
+  "version": "0.1.6",
+  "source_sha": "799fa692ef5e775f0044fe300f65fd4564771d47",
+  "branch": "codex/launcher-updater",
+  "build_run": 34778218510,
+  "checks_run": 34778334417,
+  "stable_feed": "https://shacraft.ru/launcher/updates/stable.json",
+  "feed_sha256": "342876aee8760a984421889cec1453dd642ebf988ab2bad27f23ea4f4f203f8d",
+  "feed_signature_verified": true,
+  "feed_payload_equals_locally_signed_payload": true,
+  "platforms": [
+    "darwin-aarch64",
+    "darwin-x86_64",
+    "linux-x86_64",
+    "linux-x86_64-appimage",
+    "linux-x86_64-deb",
+    "windows-x86_64"
+  ],
+  "artifacts": [
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_amd64.AppImage",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_amd64.AppImage",
+      "size": 83274232,
+      "sha256": "fa01905baddebd08b59ab7855009f0b29df02fcd3813941a0190f5135ff58f7c",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_amd64.deb",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_amd64.deb",
+      "size": 5997818,
+      "sha256": "01621fde16f6fc1ca453acffb1d22d664c8d8b60909d22a8aa2af10ac80d8737",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_x64-setup.exe",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_x64-setup.exe",
+      "size": 3793645,
+      "sha256": "0bb2a577d88d4387f23efcd28b19bf83e373b1b10c5cbbb5d6e0f69428d9f9ab",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_x64_en-US.msi",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_x64_en-US.msi",
+      "size": 5554176,
+      "sha256": "8a53a9d8d6dbdd98238b294df604fe5050375e64709dfdff942bf60fcd61519b",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_aarch64.app.tar.gz",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_aarch64.app.tar.gz",
+      "size": 5876796,
+      "sha256": "c113afc0794eaa6788cb994e7d84f821d22573d559f3cddfb0bcd5c2cad557cf",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_aarch64.dmg",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_aarch64.dmg",
+      "size": 6420101,
+      "sha256": "0391a1d4afa6cb21663f1f8de367ecdd68a51656db48e86ad0bec617270c6036",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_x86_64.app.tar.gz",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_x86_64.app.tar.gz",
+      "size": 6032564,
+      "sha256": "ee025cd13af1887334d0af5a7e04259eddd6339fe8509b108e0b3ac0e7268daf",
+      "public_signature_verified": true
+    },
+    {
+      "artifact": "ShaCraft.Launcher_0.1.6_x64.dmg",
+      "url": "https://shacraft.ru/downloads/shacraft-launcher/0.1.6/ShaCraft.Launcher_0.1.6_x64.dmg",
+      "size": 6591340,
+      "sha256": "cd54c8f975bb7a1ec587bbadde35caf4a3eb9a1f86182150310590e41dec4023",
+      "public_signature_verified": true
+    }
+  ],
+  "previous_feed_version": "0.1.5",
+  "previous_feed_sha256": "d81ab2b007f7f9a385f2ec28d17f204e75c0c2e92cf40931064dd66d3bd2898f",
+  "previous_feed_backup": "/root/shacraft/.release-staging/launcher-0.1.6/stable.before-0.1.6.json",
+  "private_key_location": "remains on operator workstation; not uploaded",
+  "remote_publication": "all8 local signatures verified, remote hashes/signatures verified, dry-run passed, atomic publish passed",
+  "limitations": "Cross-platform CI and package inspection passed. Windows/macOS cold installation and OS signing/notarization were not exercised."
+}
