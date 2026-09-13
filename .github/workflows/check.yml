@@ -13,6 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  publisher:
+    # Ubuntu 22.04 has no minisign package. Keep the desktop compatibility
+    # check there, but exercise real signature verification on Ubuntu 24.04.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y minisign
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
   admission-client:
     runs-on: ubuntu-22.04
     steps:
@@ -41,9 +49,8 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf minisign
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
