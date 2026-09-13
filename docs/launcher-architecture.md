@@ -2,7 +2,7 @@
 
 ## Current capability
 
-The launcher persists local settings, synchronises Aeronautics mod/config
+The launcher persists local settings, synchronises profile mod/config
 files from the signed ShaCraft v2 manifest, installs the exact Minecraft +
 NeoForge version the manifest specifies, and launches the game. A player
 signs in with the same local ShaCraft account used on the website. The current
@@ -320,3 +320,42 @@ Linux Java 21 build and 8 mod tests pass. An opt-in native live test verifies
 signed-manifest retrieval and download/repair/restoration of the admission jar
 only in a temporary directory. Mac 0.1.5 connection failure remains unclassified
 pending exact error/log; this is not a verified macOS fix or desktop UI test.
+
+## Minigames alongside Aeronautics (2026-09-13)
+
+The new native allowlist adds profile `minigames` at
+`https://shacraft.ru/api/launcher/v2/profiles/minigames/signed-manifest` and
+its display-only count at `https://shacraft.ru/api/online/minigames`.
+Aeronautics remains a separate profile and keeps its previous managed files.
+Minigames uses Minecraft 26.2, Fabric Loader 0.19.5, Java 25 and its own
+`profiles/minigames` game directory. The signed payload supplies Fabric API
+0.160.0+26.2 and `mods/shacraft-admission-client-0.1.0.jar`; it never supplies
+Paper, the server plugins, maps, credentials or game-download URLs.
+
+`fabric.rs` obtains an exact parent/loader profile from fixed Fabric metadata,
+checks its identity and KnotClient entry point, and converts bounded Maven
+library entries into the existing verified library contract. Each artifact
+URL is constructed from a validated coordinate below fixed Fabric Maven;
+metadata-supplied alternative origins are rejected. SHA-1 and size come from
+Fabric metadata, or the same Maven's hash sidecar and HEAD for the loader jar.
+Java provisioning already accepts exactly Java 25. Automatic installation on
+a platform still requires a real cold-install check on that platform.
+
+Both profiles claim/display the canonical `aoc` nickname. Only the native
+profile mapping determines ticket `server_id` (`aoc` or `minigames`), and the
+response must match that exact server. The backend is responsible for shared
+access checks at both issuance and redemption. Existing account sessions and
+settings need no migration. No copied subscription/whitelist grant is trusted.
+
+Minigames adds native `--quickPlayMultiplayer 135.106.154.86:25568` at launch.
+The client-only Fabric companion validates the actual socket target and signs
+the existing configuration challenge with `minigames` in the transcript.
+Paper performs verification before entry; its early duplicate UUID gate must
+run before vanilla would evict the existing player. There is no proxy and no
+client-side shared secret. One ticket is used for one game connection; a fresh
+launcher start is required after expiry, consumption or a failed proof attempt.
+
+The integration is staged until server authentication, signed profile payload,
+and a newer signed launcher release are deployed and checked together. The
+existing public 0.1.5 binary cannot select the new profile by a website-only
+catalog change. Preserve both catalog entries when publishing either profile.

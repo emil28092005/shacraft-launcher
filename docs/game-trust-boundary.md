@@ -90,3 +90,21 @@ URL — cannot redirect a download to an attacker-controlled host in any of
 these domains. When adding a new game-related download, verify its host is
 one of the ones above (or add a new hardcoded constant following the same
 pattern) rather than accepting a URL from anywhere else.
+
+## 5. Fabric (`fabric.rs`, Minigames)
+
+Metadata comes only from `https://meta.fabricmc.net/v2/versions/loader/` for
+manifest-selected, validated version identifiers. Profile ID, parent and
+KnotClient main class must match. At most 512 KiB metadata and 32 libraries
+are accepted. Library URLs are constructed only below
+`https://maven.fabricmc.net/` from portable three-part Maven coordinates;
+other metadata origins are rejected. Libraries require a 40-hex SHA-1 and a
+positive size up to 64 MiB. When Fabric metadata omits either for its loader
+jar, the fixed Maven's `.sha1` sidecar and HEAD provide them. Existing verified
+downloads perform the hash/size check and atomic rename. The ShaCraft signed
+manifest cannot select Fabric metadata URLs, repositories or launch targets.
+
+Minecraft 26.2's official version metadata requires Java 25. `runtime.rs`
+already provisions a separate Adoptium Java 25 runtime without changing the
+Aeronautics Java 21 runtime. Client companion mods and Fabric API are separately
+approved ShaCraft managed files in the signed Minigames profile.

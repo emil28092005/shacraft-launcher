@@ -2,6 +2,7 @@ mod admission;
 #[cfg(target_os = "linux")]
 mod deb_updater;
 mod download;
+mod fabric;
 mod java;
 mod launch;
 mod manifest;

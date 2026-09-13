@@ -3,6 +3,9 @@ import { test } from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AccountSettings } from './AccountSettings'
 import { RecoveryCodesModal } from './RecoveryCodesModal'
+import { ServerStage } from './ServerStage'
+import { Library } from './Library'
+import { servers } from '../data/servers'
 import type { useAccount } from '../hooks/useAccount'
 
 function session(): ReturnType<typeof useAccount> {
@@ -31,7 +34,7 @@ test('linked identity is displayed read-only while an unlinked account offers ve
   doesNotMatch(linked, /<input|Привязать ник/)
   const unlinked = renderToStaticMarkup(<AccountSettings session={{ ...session(), account: { username: 'website_login', links: [] } }} locked={false} />)
   match(unlinked, /Привязать ник/)
-  match(unlinked, /Aeronautics/)
+  match(unlinked, /Общий ник ShaCraft/)
 })
 
 test('recovery codes render only until explicitly acknowledged', () => {
@@ -42,4 +45,16 @@ test('recovery codes render only until explicitly acknowledged', () => {
   match(html, /TEST-RECOVERY-TWO/)
   match(html, /Я сохранил коды/)
   equal(renderToStaticMarkup(<RecoveryCodesModal codes={[]} onAcknowledge={() => {}} />), '')
+})
+
+test('both profiles remain selectable and display their own runtime requirements', () => {
+  const library = renderToStaticMarkup(<Library selected={servers[1]!} profiles={{}} account={null}
+    locked={false} native={false} onSelect={() => {}} onSettings={() => {}} />)
+  match(library, /Aeronautics/)
+  match(library, /Minigames/)
+  equal((library.match(/class="server-row/g) ?? []).length, 2)
+  const stage = (index: number) => renderToStaticMarkup(<ServerStage server={servers[index]!} status={null}>{null}</ServerStage>)
+  match(stage(0), /Версия 21/)
+  match(stage(1), /Версия 25/)
+  match(stage(1), /Fabric 0.19.5/)
 })

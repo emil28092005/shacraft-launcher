@@ -4,8 +4,9 @@
 
 Cross-platform desktop launcher for the ShaCraft Minecraft network. It is a
 Tauri 2 application: React/Vite is the UI and Rust owns all filesystem,
-network and process-adjacent work. The current production profile is
-**Aeronautics** (Minecraft 1.21.1, NeoForge 21.1.248, Java 21).
+network and process-adjacent work. Profiles are **Aeronautics** (Minecraft 1.21.1, NeoForge 21.1.248, Java 21)
+and **Minigames** (Minecraft 26.2, Fabric 0.19.5, Java 25). See the staged
+Minigames integration record below; published launcher status is separate.
 
 This repository owns the launcher only. The server-side API and published
 payload are in `/root/shacraft` on the ShaCraft host; see
@@ -21,8 +22,9 @@ payload are in `/root/shacraft` on the ShaCraft host; see
 
 ## Trust model
 
-- The only supported remote profile manifest endpoint is
-  `https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest`.
+- The only supported remote profile manifest endpoints are the fixed
+  `https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest` and
+  `https://shacraft.ru/api/launcher/v2/profiles/minigames/signed-manifest`.
   The read-only Aeronautics player-count endpoint
   `https://shacraft.ru/api/online/aoc` is also hardcoded in `remote.rs`; it
   is display-only and is never allowed to influence downloads or launching.
@@ -217,3 +219,29 @@ Linux Java 21 build and 8 mod tests pass. An opt-in native live test verifies
 signed-manifest retrieval and download/repair/restoration of the admission jar
 only in a temporary directory. Mac 0.1.5 connection failure remains unclassified
 pending exact error/log; this is not a verified macOS fix or desktop UI test.
+
+## Minigames integration (2026-09-13, staged)
+
+- Native profile mapping is fixed: aeronautics → aoc; minigames → minigames.
+  Both display/claim the canonical existing aoc nickname. The backend enforces
+  the current shared aoc subscription and whitelist for Minigames as well.
+  Ticket requests and responses remain bound to the selected server; never
+  accept an aoc ticket as a Minigames ticket.
+- `fabric.rs` adds independent exact HTTPS domains `meta.fabricmc.net` and
+  `maven.fabricmc.net`. It verifies profile identity/parent/main class, bounded
+  metadata, portable Maven coordinates, hashes and sizes before the existing
+  atomic library installer. Unknown loaders now fail manifest validation.
+- Minigames launches with a native-owned Quick Play endpoint
+  `135.106.154.86:25568`. The manifest cannot choose a game destination.
+- `admission-client/` owns the small client-only Fabric 26.2 companion. Its
+  configuration-phase proof uses `minigames` in the existing Ed25519 transcript,
+  verifies the actual socket, canonical nickname and nonce, and signs once per
+  process. Only a fresh launch can retry a consumed ticket. Java receives only
+  the ephemeral ticket and private key in its child environment, never the
+  website session/password. Keep server verification on Paper before world
+  entry with an early duplicate UUID guard.
+- The standalone Paper admission adapter and backend remain server-project
+  responsibilities. Do not put map/SMASH source into this launcher repository.
+- Production updater publication requires a separately built, monotonically
+  newer launcher release and existing operator signatures. Source tests or a
+  client jar alone do not update installed 0.1.5 launchers.

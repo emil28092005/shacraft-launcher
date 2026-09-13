@@ -12,4 +12,9 @@ export const servers: readonly [Server, ...Server[]] = [
     loader: 'NeoForge 21.1.248',
     profileId: 'aeronautics',
   },
+  {
+    id: 'minigames', kicker: 'Лобби и арены', name: 'Minigames',
+    subtitle: 'Небесные острова. Сражения на аренах SMASH.',
+    version: '26.2 · Fabric 0.19.5', loader: 'Fabric 0.19.5', profileId: 'minigames',
+  },
 ]

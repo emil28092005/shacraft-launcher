@@ -1,7 +1,7 @@
 import type { ShaCraftAccount } from '../types/launcher'
 import { isValidNickname } from './settings'
 
-/** Only the authenticated account's verified Aeronautics link selects a name. */
+/** Only the authenticated account's verified aoc link selects the shared network nickname. */
 export function linkedNickname(account: ShaCraftAccount | null | undefined): string | null {
   const nickname = account?.links.find((link) => link.server_id === 'aoc')?.mc_username
   return nickname && isValidNickname(nickname) ? nickname : null

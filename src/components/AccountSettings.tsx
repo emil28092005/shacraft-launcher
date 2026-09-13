@@ -43,7 +43,7 @@ export function AccountSettings({ session, locked }: { session: ReturnType<typeo
       {account && !linkedNickname && (
         <form noValidate onSubmit={(event) => { event.preventDefault(); if (!disabled) void session.startLink(nickname) }}>
           <label className="text-setting">
-            <span><strong>Игровой ник</strong><small>Aeronautics</small></span>
+            <span><strong>Игровой ник</strong><small>Общий ник ShaCraft</small></span>
             <input value={nickname} minLength={3} maxLength={16} pattern="[A-Za-z0-9_]{3,16}" required
               disabled={disabled || session.linking} onChange={(event) => setNickname(event.target.value)} placeholder="Player" />
             <small>Свободный ник закрепляется за аккаунтом. Для старого игрового ника обратитесь к администратору.</small>

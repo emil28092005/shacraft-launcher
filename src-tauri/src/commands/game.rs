@@ -1,6 +1,6 @@
 use super::data_dir;
 use crate::{
-    java, launch, manifest, mojang, neoforge, operations::LauncherOperations, remote, runtime,
+    fabric, java, launch, manifest, mojang, neoforge, operations::LauncherOperations, remote, runtime,
     settings, shacraft_account,
 };
 use reqwest::blocking::Client;
@@ -56,6 +56,9 @@ fn resolve_merged_version(
         )
         .map_err(|error| error.to_string())?;
         mojang::merge_versions(&vanilla, Some(&neoforge_version)).map_err(|error| error.to_string())
+    } else if manifest.minecraft.loader.kind == "fabric" {
+        let child = fabric::fetch_profile(&manifest.minecraft.version, &manifest.minecraft.loader.version)?;
+        mojang::merge_versions(&vanilla, Some(&child)).map_err(|error| error.to_string())
     } else {
         mojang::merge_versions(&vanilla, None).map_err(|error| error.to_string())
     }
@@ -205,7 +208,7 @@ pub(crate) async fn launch_game(
         // through spawn so local logout/account switching cannot race issuance.
         let _account_permit = account_operation.acquire("ShaCraft account operation")?;
         let admission =
-            shacraft_account::issue_admission(&data_dir).map_err(|error| error.to_string())?;
+            shacraft_account::issue_admission(&data_dir, crate::admission::server_for_profile(&profile_id)?).map_err(|error| error.to_string())?;
         let request = launch::LaunchRequest {
             java_executable: Path::new(&java_install.executable),
             game_dir: &game_dir,

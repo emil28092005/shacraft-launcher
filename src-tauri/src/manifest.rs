@@ -91,7 +91,7 @@ fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
         ));
     }
     if !is_version(&manifest.minecraft.version)
-        || manifest.minecraft.loader.kind.trim().is_empty()
+        || !matches!(manifest.minecraft.loader.kind.as_str(), "neoforge" | "fabric" | "vanilla")
         || !is_version(&manifest.minecraft.loader.version)
     {
         return Err(ManifestError::Invalid(

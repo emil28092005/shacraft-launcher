@@ -1,0 +1,33 @@
+{
+  "recorded_at": "2026-09-13T19:32:59.436884+00:00",
+  "result": "joined_world",
+  "client": "Minecraft 26.2 / Fabric Loader 0.19.5 / Fabric API 0.160.0+26.2",
+  "java": "25.0.2",
+  "client_jar_sha256": "3335626b7c8fdd233e8531ad382594398c7df48842b1b919934d1154dd4ba8f1",
+  "client_jar_size": 10667,
+  "profile": "minigames",
+  "synthetic_player": "AdmissionPilot",
+  "endpoint": "127.0.0.1:25608",
+  "environment": "isolated Xvfb :95; separate temporary game directory; synthetic account/ticket; explicit local socket test flag",
+  "server_evidence": [
+    "[22:32:02 INFO]: AdmissionPilot joined the game",
+    "[22:32:02 INFO]: AdmissionPilot[/127.0.0.1:54602] logged in with entity id 77 at ([minecraft:shacraft_lobby_v2]0.5, 96.0, 43.5)"
+  ],
+  "verified": [
+    "production companion jar bytes unchanged",
+    "queued minecraft:register during configuration",
+    "server-bound Ed25519 response accepted",
+    "actual vanilla client entered lobby world"
+  ],
+  "not_tested": [
+    "production public endpoint login",
+    "Windows/macOS cold installation",
+    "full GUI launcher install/account flow"
+  ],
+  "notes": "Offline client emits Microsoft profile-certificate HTTP401; admission and world entry succeeded. Real account/session/password not used.",
+  "backend_evidence": {
+    "source": "backend agent read-only synthetic SQLite query",
+    "issued_minigames_tickets_for_player": 1,
+    "consumed_minigames_tickets_for_player": 1
+  }
+}

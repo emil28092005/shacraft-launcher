@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "shacraft_admission",
+  "version": "${version}",
+  "name": "ShaCraft Minigames Admission",
+  "description": "Account-bound admission to ShaCraft Minigames.",
+  "environment": "client",
+  "entrypoints": { "client": ["ru.shacraft.admission.ClientAdmission"] },
+  "depends": { "fabricloader": ">=0.19.5", "minecraft": "26.2", "java": ">=25", "fabric-networking-api-v1": "*" }
+}

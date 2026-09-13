@@ -58,6 +58,7 @@ pub fn library_http_client() -> Result<Client, reqwest::Error> {
             MOJANG_HOSTS[2],
             MOJANG_HOSTS[3],
             crate::neoforge::NEOFORGE_HOST,
+            crate::fabric::MAVEN_HOST,
         ],
         std::time::Duration::from_secs(10 * 60),
     )
@@ -67,7 +68,7 @@ pub fn library_http_client() -> Result<Client, reqwest::Error> {
 /// own fixed Maven. The profile itself comes from the SHA-256-verified
 /// NeoForge installer, never from the ShaCraft manifest.
 fn is_allowed_library_host(url: &str) -> bool {
-    is_allowed_host(url) || crate::neoforge::is_allowed_host(url)
+    is_allowed_host(url) || crate::neoforge::is_allowed_host(url) || crate::trusted_http::allows(url, &[crate::fabric::MAVEN_HOST])
 }
 
 #[derive(Debug)]

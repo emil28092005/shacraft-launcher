@@ -13,6 +13,8 @@ use std::{
 
 const AERONAUTICS_MANIFEST: &str =
     "https://shacraft.ru/api/launcher/v2/profiles/aeronautics/signed-manifest";
+const MINIGAMES_MANIFEST: &str = "https://shacraft.ru/api/launcher/v2/profiles/minigames/signed-manifest";
+const MINIGAMES_ONLINE: &str = "https://shacraft.ru/api/online/minigames";
 const AERONAUTICS_ONLINE: &str = "https://shacraft.ru/api/online/aoc";
 const MANIFEST_PUBLIC_KEY: &str = "2S3FRdZj4Xw5nJpZ3IhqVITBg3nTH9AtGSo1Ew9+qVQ=";
 const MANIFEST_KEY_ID: &str = "2026-09-06";
@@ -71,6 +73,7 @@ impl fmt::Display for RemoteError {
 pub fn fetch_manifest(profile_id: &str) -> Result<Manifest, RemoteError> {
     let url = match profile_id {
         "aeronautics" => AERONAUTICS_MANIFEST,
+        "minigames" => MINIGAMES_MANIFEST,
         _ => return Err(RemoteError::UnknownProfile),
     };
     let client = Client::builder()
@@ -125,6 +128,7 @@ fn fetch_manifest_bytes(client: &Client, url: &str) -> Result<Vec<u8>, RemoteErr
 pub fn fetch_server_status(profile_id: &str) -> Result<ServerStatus, RemoteError> {
     let url = match profile_id {
         "aeronautics" => AERONAUTICS_ONLINE,
+        "minigames" => MINIGAMES_ONLINE,
         _ => return Err(RemoteError::UnknownProfile),
     };
     let client = Client::builder()

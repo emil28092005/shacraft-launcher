@@ -245,6 +245,10 @@ fn build_command(request: &LaunchRequest) -> Result<Command, LaunchError> {
     for argument in game_args {
         command.arg(substitute(&argument, &vars));
     }
+    // This endpoint is native-owned; a manifest cannot redirect game admission.
+    if request.admission.server_id() == "minigames" {
+        command.args(["--quickPlayMultiplayer", "135.106.154.86:25568"]);
+    }
     command.current_dir(request.profile_dir);
 
     let log_file = fs::File::create(request.log_path)?;
@@ -268,59 +272,62 @@ mod tests {
         let game_dir = directory.join("game");
         let profile_dir = directory.join("profile");
         let log_path = directory.join("game.log");
-        let vanilla: mojang::VersionJson = serde_json::from_value(serde_json::json!({
-            "id": "1.21.1",
-            "mainClass": "net.minecraft.client.main.Main",
-            "arguments": {
-                "game": ["--username", "${auth_player_name}", "--uuid", "${auth_uuid}", "--accessToken", "${auth_access_token}"],
-                "jvm": ["-cp", "${classpath}", "-Dlauncher=${launcher_name}"]
-            },
-            "assetIndex": {"id": "17", "sha1": "0".repeat(40), "size": 1, "url": "https://piston-meta.mojang.com/assets"},
-            "downloads": {"client": {"sha1": "0".repeat(40), "size": 1, "url": "https://piston-data.mojang.com/client.jar"}}
-        })).unwrap();
-        let merged = mojang::merge_versions(&vanilla, None).unwrap();
-        let response = serde_json::from_value(serde_json::json!({
-            "ticket_id": URL_SAFE_NO_PAD.encode([73_u8; 32]), "mc_username": "Ticket_Name",
-            "server_id": "aoc", "expires_in_seconds": 600
-        }))
-        .unwrap();
-        let admission = AdmissionKey::generate().unwrap().bind(response).unwrap();
-        let request = LaunchRequest {
-            java_executable: Path::new("java"),
-            game_dir: &game_dir,
-            profile_dir: &profile_dir,
-            merged: &merged,
-            admission: &admission,
-            memory_mb: 6144,
-            log_path: &log_path,
-        };
-        let command = build_command(&request).unwrap();
-        let env: HashMap<_, _> = command.get_envs().collect();
-        let proof = [TICKET_ENV, PRIVATE_KEY_ENV]
-            .map(|name| env[std::ffi::OsStr::new(name)].unwrap().to_str().unwrap());
-        let arguments: Vec<_> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy())
-            .collect();
-        assert!(arguments
-            .windows(2)
-            .any(|args| args == ["--username", "Ticket_Name"]));
-        assert!(arguments
-            .windows(2)
-            .any(|args| args == ["--accessToken", "0"]));
-        for secret in proof {
-            assert!(arguments.iter().all(|argument| !argument.contains(secret)));
-            for path in [
-                log_path.clone(),
-                game_dir.join(".shacraft-client-id"),
-                profile_dir.join(".shacraft-jvm.args"),
-            ] {
-                if path.exists() {
-                    assert!(!fs::read_to_string(path).unwrap().contains(secret));
+        for server_id in ["aoc", "minigames"] {
+            let vanilla: mojang::VersionJson = serde_json::from_value(serde_json::json!({
+                "id": "1.21.1",
+                "mainClass": "net.minecraft.client.main.Main",
+                "arguments": {
+                    "game": ["--username", "${auth_player_name}", "--uuid", "${auth_uuid}", "--accessToken", "${auth_access_token}"],
+                    "jvm": ["-cp", "${classpath}", "-Dlauncher=${launcher_name}"]
+                },
+                "assetIndex": {"id": "17", "sha1": "0".repeat(40), "size": 1, "url": "https://piston-meta.mojang.com/assets"},
+                "downloads": {"client": {"sha1": "0".repeat(40), "size": 1, "url": "https://piston-data.mojang.com/client.jar"}}
+            })).unwrap();
+            let merged = mojang::merge_versions(&vanilla, None).unwrap();
+            let response = serde_json::from_value(serde_json::json!({
+                "ticket_id": URL_SAFE_NO_PAD.encode([73_u8; 32]), "mc_username": "Ticket_Name",
+                "server_id": server_id, "expires_in_seconds": 600
+            }))
+            .unwrap();
+            let admission = AdmissionKey::generate(server_id).unwrap().bind(response).unwrap();
+            let request = LaunchRequest {
+                java_executable: Path::new("java"),
+                game_dir: &game_dir,
+                profile_dir: &profile_dir,
+                merged: &merged,
+                admission: &admission,
+                memory_mb: 6144,
+                log_path: &log_path,
+            };
+            let command = build_command(&request).unwrap();
+            let env: HashMap<_, _> = command.get_envs().collect();
+            let proof = [TICKET_ENV, PRIVATE_KEY_ENV]
+                .map(|name| env[std::ffi::OsStr::new(name)].unwrap().to_str().unwrap());
+            let arguments: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy())
+                .collect();
+            assert!(arguments
+                .windows(2)
+                .any(|args| args == ["--username", "Ticket_Name"]));
+            assert!(arguments
+                .windows(2)
+                .any(|args| args == ["--accessToken", "0"]));
+            assert_eq!(arguments.windows(2).any(|pair| pair == ["--quickPlayMultiplayer", "135.106.154.86:25568"]), server_id == "minigames");
+            for secret in proof {
+                assert!(arguments.iter().all(|argument| !argument.contains(secret)));
+                for path in [
+                    log_path.clone(),
+                    game_dir.join(".shacraft-client-id"),
+                    profile_dir.join(".shacraft-jvm.args"),
+                ] {
+                    if path.exists() {
+                        assert!(!fs::read_to_string(path).unwrap().contains(secret));
+                    }
                 }
             }
+            drop(command);
         }
-        drop(command);
         fs::remove_dir_all(directory).unwrap();
     }
 

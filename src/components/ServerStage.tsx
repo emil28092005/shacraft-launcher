@@ -17,7 +17,7 @@ export function ServerStage({ server, status, children }: { server: Server; stat
         <p>{server.kicker}</p><h1>{server.name}</h1><h2>{server.subtitle}</h2>
         <dl className="hero-meta">
           <div><dt>Загрузчик</dt><dd>{server.loader}</dd></div>
-          <div><dt>Java</dt><dd>Версия 21</dd></div>
+          <div><dt>Java</dt><dd>Версия {server.id === 'minigames' ? 25 : 21}</dd></div>
         </dl>
       </section>
       {children}

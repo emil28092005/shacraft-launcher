@@ -24,7 +24,7 @@ export function Library({ selected, profiles, account, locked, native, onSelect,
         <button className="rail-button active" aria-label="Настройки" onClick={onSettings}><Settings /></button>
       </nav>
       <aside className="library-panel">
-        <div className="library-heading"><p>Сборки</p><span>{servers.length} доступна</span></div>
+        <div className="library-heading"><p>Сборки</p><span>{servers.length} сборки</span></div>
         <div className="server-list">
           {servers.map((server) => {
             const profile = profiles[server.profileId]
@@ -33,7 +33,7 @@ export function Library({ selected, profiles, account, locked, native, onSelect,
             return (
               <button key={server.id} className={`server-row ${selected.id === server.id ? 'selected' : ''}`}
                 aria-pressed={selected.id === server.id} disabled={locked} onClick={() => onSelect(server)}>
-                <span className={`server-glyph ${server.id}`} aria-hidden="true">A</span>
+                <span className={`server-glyph ${server.id}`} aria-hidden="true">{server.name.slice(0, 1)}</span>
                 <span className="server-copy"><strong>{server.name}</strong><small>{status}</small></span>
                 <ChevronRight size={16} />
               </button>

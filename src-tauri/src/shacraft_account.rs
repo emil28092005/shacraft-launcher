@@ -274,9 +274,10 @@ pub fn claim_nickname(data_dir: &Path, nickname: &str) -> Result<Account, Accoun
 /// this response is exposed to the webview or persisted with account settings.
 pub(crate) fn issue_admission(
     data_dir: &Path,
+    server_id: &'static str,
 ) -> Result<crate::admission::Admission, AccountError> {
     let token = load_session(data_dir)?;
-    let key = crate::admission::AdmissionKey::generate()
+    let key = crate::admission::AdmissionKey::generate(server_id)
         .map_err(|message| AccountError::Api(message.into()))?;
     let response = client()?
         .post(format!("{API_ORIGIN}{ADMISSION_ENDPOINT}"))
@@ -359,7 +360,7 @@ mod tests {
         let directory = temporary_directory();
         crate::settings::save(&directory, crate::settings::LauncherSettings::default()).unwrap();
         assert!(matches!(
-            issue_admission(&directory),
+            issue_admission(&directory, "aoc"),
             Err(AccountError::InvalidSession)
         ));
         fs::remove_dir_all(directory).unwrap();

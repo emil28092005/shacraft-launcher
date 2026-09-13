@@ -19,11 +19,21 @@ use zeroize::Zeroizing;
 
 pub(crate) const TICKET_ENV: &str = "SHACRAFT_ADMISSION_TICKET";
 pub(crate) const PRIVATE_KEY_ENV: &str = "SHACRAFT_ADMISSION_PRIVATE_KEY";
+#[cfg(test)]
 const SERVER_ID: &str = "aoc";
+
+pub(crate) fn server_for_profile(profile: &str) -> Result<&'static str, &'static str> {
+    match profile {
+        "aeronautics" => Ok("aoc"),
+        "minigames" => Ok("minigames"),
+        _ => Err("Unknown ShaCraft profile"),
+    }
+}
 const MAX_LIFETIME_SECONDS: u64 = 600;
 
 // Deliberately no Debug, Clone or Serialize for secret-bearing values.
 pub(crate) struct AdmissionKey {
+    server_id: &'static str,
     public_key: String,
     private_key: Zeroizing<String>,
 }
@@ -43,13 +53,15 @@ pub(crate) struct TicketResponse {
 }
 
 pub(crate) struct Admission {
+    server_id: &'static str,
     ticket_id: Zeroizing<String>,
     private_key: Zeroizing<String>,
     identity: PlayerIdentity,
 }
 
 impl AdmissionKey {
-    pub(crate) fn generate() -> Result<Self, &'static str> {
+    pub(crate) fn generate(server_id: &'static str) -> Result<Self, &'static str> {
+        if !matches!(server_id, "aoc" | "minigames") { return Err("Unknown ShaCraft server"); }
         let mut seed = Zeroizing::new([0_u8; 32]);
         getrandom::fill(seed.as_mut())
             .map_err(|_| "Не удалось создать защищённый ключ входа. Повторите запуск лаунчера.")?;
@@ -65,6 +77,7 @@ impl AdmissionKey {
             .to_pkcs8_der()
             .map_err(|_| "Не удалось подготовить защищённый ключ входа.")?;
         Ok(Self {
+            server_id,
             public_key,
             private_key: Zeroizing::new(STANDARD.encode(encoded.as_bytes())),
         })
@@ -72,7 +85,7 @@ impl AdmissionKey {
 
     pub(crate) fn request(&self) -> TicketRequest<'_> {
         TicketRequest {
-            server_id: SERVER_ID,
+            server_id: self.server_id,
             public_key: &self.public_key,
         }
     }
@@ -92,12 +105,13 @@ impl AdmissionKey {
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
         if !valid_ticket
             || !valid_nickname
-            || response.server_id != SERVER_ID
+            || response.server_id != self.server_id
             || !(1..=MAX_LIFETIME_SECONDS).contains(&response.expires_in_seconds)
         {
             return Err("Сервер вернул некорректное разрешение на вход. Повторите попытку позже.");
         }
         Ok(Admission {
+            server_id: self.server_id,
             ticket_id,
             private_key: self.private_key,
             identity: PlayerIdentity::Offline {
@@ -108,6 +122,7 @@ impl AdmissionKey {
 }
 
 impl Admission {
+    pub(crate) fn server_id(&self) -> &str { self.server_id }
     pub(crate) fn identity(&self) -> &PlayerIdentity {
         &self.identity
     }
@@ -133,9 +148,24 @@ mod tests {
     }
 
     #[test]
+    fn profile_tickets_are_server_bound_with_shared_canonical_identity() {
+        assert_eq!(server_for_profile("aeronautics").unwrap(), "aoc");
+        assert_eq!(server_for_profile("minigames").unwrap(), "minigames");
+        assert!(server_for_profile("../../other").is_err());
+        assert!(AdmissionKey::generate("other").is_err());
+        assert!(AdmissionKey::generate("minigames").unwrap().bind(response()).is_err());
+        let key=AdmissionKey::generate("minigames").unwrap();
+        assert_eq!(serde_json::to_value(key.request()).unwrap()["server_id"], "minigames");
+        let mut payload=response(); payload.server_id="minigames".into();
+        let admitted=key.bind(payload).unwrap();
+        assert_eq!(admitted.server_id(), "minigames");
+        assert_eq!(admitted.identity().name(), "Canonical_Name");
+    }
+
+    #[test]
     fn generates_distinct_keys_and_only_sends_the_public_key() {
-        let key = AdmissionKey::generate().unwrap();
-        let other = AdmissionKey::generate().unwrap();
+        let key = AdmissionKey::generate("aoc").unwrap();
+        let other = AdmissionKey::generate("aoc").unwrap();
         assert_ne!(key.public_key, other.public_key);
         let payload = serde_json::to_value(key.request()).unwrap();
         assert_eq!(payload.as_object().unwrap().len(), 2);
@@ -173,7 +203,7 @@ mod tests {
         for mutate in mutations {
             let mut payload = response();
             mutate(&mut payload);
-            assert!(AdmissionKey::generate().unwrap().bind(payload).is_err());
+            assert!(AdmissionKey::generate("aoc").unwrap().bind(payload).is_err());
         }
     }
 
@@ -181,7 +211,7 @@ mod tests {
     fn secrets_only_enter_the_child_environment_and_identity_comes_from_ticket() {
         let original_ticket = std::env::var_os(TICKET_ENV);
         let original_key = std::env::var_os(PRIVATE_KEY_ENV);
-        let admission = AdmissionKey::generate().unwrap().bind(response()).unwrap();
+        let admission = AdmissionKey::generate("aoc").unwrap().bind(response()).unwrap();
         let mut command = Command::new("java");
         command
             .arg("-Xmx6144M")

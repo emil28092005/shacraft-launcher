@@ -10,3 +10,7 @@ src-tauri/gen/
 *.p12
 *.pfx
 *.sig
+
+admission-client/.gradle/
+admission-client/build/
+graphify-out/
