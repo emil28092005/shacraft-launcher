@@ -264,11 +264,13 @@ admission client accepts the new actual socket IP `135.106.219.182` and retains
 `135.106.154.86` for the temporary forwarding path; unrelated hosts and ports
 remain rejected. The server published updated signed companion manifests.
 
-The migration's full-platform packages are prepared on
+The migration's full-platform packages are published from
 `codex/server-migration-20260917`. Existing 0.1.6 installers still connect to the
 old IP and need that forwarding path until upgraded. Version 0.1.7 uses a newly generated operator-held updater key and the fixed
 `https://shacraft.ru/launcher/updates/stable-v2.json` channel. It requires one
 manual installation. Preserve `stable.json` at the last old-key release; never
 replace it with new-key metadata. Subsequent v2-channel releases use the new
 key, kept only at `/home/emil/.local/share/shacraft-updater/production.key`.
-Do not claim publication based on CI packages alone.
+All eight public HTTPS downloads, their signatures and the signed v2 feed were
+verified after publication. See `docs/release-0.1.7.md` and its publication
+receipt for provenance, checks and the limits of platform verification.

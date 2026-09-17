@@ -1,0 +1,93 @@
+{
+  "source_sha": "b674347e867af3edb6f00201bd30f1db7af4d9d2",
+  "version": "0.1.7",
+  "build_run": 35167814993,
+  "new_channel": "https://shacraft.ru/launcher/updates/stable-v2.json",
+  "files": [
+    {
+      "name": "ShaCraft.Launcher_0.1.7_aarch64.app.tar.gz",
+      "bytes": 5877025,
+      "sha256": "c460fd5c766b1e1f64d55e23952bead6c1e6a1ecd395e8147ce625aeca4049f7"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_aarch64.dmg",
+      "bytes": 6420405,
+      "sha256": "be869b3221363ddb9fcc755bf76a78d3e44264c0bc3a24bcd9d4396ee118a7cb"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_amd64.AppImage",
+      "bytes": 83270136,
+      "sha256": "a2e2337e1b0ee07f062383fa2e3da8e8fc51c62e2ccacda89a45a1ea0d092351"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_amd64.deb",
+      "bytes": 5997780,
+      "sha256": "b6b9913063600659dfd917c7939e3c07675ca81e35c34cf6a90edc61ef30328e"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x64-setup.exe",
+      "bytes": 3792580,
+      "sha256": "0b1167dae9fce7d85f1ad95b2857cce1df7d17fffcdd6c358901ff998c5ac6b6"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x64.dmg",
+      "bytes": 6591601,
+      "sha256": "9b6cc5660817f4dd1684282e01daa1639d98e987325ec4924b42b07ae07e44d5"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x64_en-US.msi",
+      "bytes": 5554176,
+      "sha256": "54d0e8425f0087f13c396efa464da5e8e95203e222353d66c11d68f1076abbb4"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x86_64.app.tar.gz",
+      "bytes": 6032631,
+      "sha256": "05748cc29462f850a12da3cd84336872af4ee8f5a5de0a3b10d91461c60fbad7"
+    }
+  ],
+  "verified_at": "2026-09-17T01:09:31.123799+00:00",
+  "public_https_packages": [
+    {
+      "name": "ShaCraft.Launcher_0.1.7_aarch64.app.tar.gz",
+      "bytes": 5877025,
+      "sha256": "c460fd5c766b1e1f64d55e23952bead6c1e6a1ecd395e8147ce625aeca4049f7"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_aarch64.dmg",
+      "bytes": 6420405,
+      "sha256": "be869b3221363ddb9fcc755bf76a78d3e44264c0bc3a24bcd9d4396ee118a7cb"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_amd64.AppImage",
+      "bytes": 83270136,
+      "sha256": "a2e2337e1b0ee07f062383fa2e3da8e8fc51c62e2ccacda89a45a1ea0d092351"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_amd64.deb",
+      "bytes": 5997780,
+      "sha256": "b6b9913063600659dfd917c7939e3c07675ca81e35c34cf6a90edc61ef30328e"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x64-setup.exe",
+      "bytes": 3792580,
+      "sha256": "0b1167dae9fce7d85f1ad95b2857cce1df7d17fffcdd6c358901ff998c5ac6b6"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x64.dmg",
+      "bytes": 6591601,
+      "sha256": "9b6cc5660817f4dd1684282e01daa1639d98e987325ec4924b42b07ae07e44d5"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x64_en-US.msi",
+      "bytes": 5554176,
+      "sha256": "54d0e8425f0087f13c396efa464da5e8e95203e222353d66c11d68f1076abbb4"
+    },
+    {
+      "name": "ShaCraft.Launcher_0.1.7_x86_64.app.tar.gz",
+      "bytes": 6032631,
+      "sha256": "05748cc29462f850a12da3cd84336872af4ee8f5a5de0a3b10d91461c60fbad7"
+    }
+  ],
+  "old_feed_preserved": true,
+  "feed_sha256": "b46d9a6ef974e177fd3b0d945ff22efb0ec0afaaa71bae7f7a23003997682166"
+}
