@@ -247,7 +247,7 @@ fn build_command(request: &LaunchRequest) -> Result<Command, LaunchError> {
     }
     // This endpoint is native-owned; a manifest cannot redirect game admission.
     if request.admission.server_id() == "minigames" {
-        command.args(["--quickPlayMultiplayer", "135.106.154.86:25568"]);
+        command.args(["--quickPlayMultiplayer", "shacraft.ru:25568"]);
     }
     command.current_dir(request.profile_dir);
 
@@ -313,7 +313,7 @@ mod tests {
             assert!(arguments
                 .windows(2)
                 .any(|args| args == ["--accessToken", "0"]));
-            assert_eq!(arguments.windows(2).any(|pair| pair == ["--quickPlayMultiplayer", "135.106.154.86:25568"]), server_id == "minigames");
+            assert_eq!(arguments.windows(2).any(|pair| pair == ["--quickPlayMultiplayer", "shacraft.ru:25568"]), server_id == "minigames");
             for secret in proof {
                 assert!(arguments.iter().all(|argument| !argument.contains(secret)));
                 for path in [

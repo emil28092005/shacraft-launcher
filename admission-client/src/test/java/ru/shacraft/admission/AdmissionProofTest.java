@@ -23,7 +23,11 @@ class AdmissionProofTest {
             assertThrows(IllegalArgumentException.class,()->AdmissionProof.transcript(v[0],v[1],v[2],v[3]));
     }
     @Test void trustsOnlyMinigamesSocketAndExplicitLocalTests() {
+        assertTrue(AdmissionProof.allowedTarget("shacraft.ru",25568,false));
+        assertTrue(AdmissionProof.allowedTarget("135.106.219.182",25568,false));
         assertTrue(AdmissionProof.allowedTarget("135.106.154.86",25568,false));
+        assertFalse(AdmissionProof.allowedTarget("135.106.219.183",25568,false));
+        assertFalse(AdmissionProof.allowedTarget("135.106.219.182",25567,false));
         assertFalse(AdmissionProof.allowedTarget("135.106.154.86",25567,false));
         assertFalse(AdmissionProof.allowedTarget("127.0.0.1",25568,false));
         assertTrue(AdmissionProof.allowedTarget("127.0.0.1",25570,true));

@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_updater::{Update, UpdaterBuilder, UpdaterExt};
 use url::Url;
 
-pub(crate) const UPDATE_ENDPOINT: &str = "https://shacraft.ru/launcher/updates/stable.json";
+pub(crate) const UPDATE_ENDPOINT: &str = "https://shacraft.ru/launcher/updates/stable-v2.json";
 pub(crate) const MAX_METADATA_BYTES: usize = 192 * 1024;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_ARTIFACT_BYTES: usize = 256 * 1024 * 1024;

@@ -1,3 +1,8 @@
+> From 0.1.7, new installations trust the new operator key and use
+> `https://shacraft.ru/launcher/updates/stable-v2.json`. Migration from 0.1.6
+> requires manual installation. Keep the old `stable.json` feed unchanged.
+> For future releases use `stable-v2.json` in publication commands below.
+
 # Signed launcher updates
 
 The application updater is separate from the signed Aeronautics modpack

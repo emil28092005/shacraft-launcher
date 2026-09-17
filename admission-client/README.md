@@ -13,7 +13,7 @@ The native launcher supplies `SHACRAFT_ADMISSION_TICKET` and
 The client accepts a CONFIGURATION payload on `shacraft_admission:challenge`
 with three Minecraft UTF strings: server ID (16), nickname (16), nonce (43).
 It verifies server `minigames`, the exact current game nickname and actual
-socket `135.106.154.86:25568`, then signs once with the ephemeral Ed25519 key.
+socket `135.106.219.182:25568` (the previous IP remains accepted during migration), then signs once with the ephemeral Ed25519 key.
 The response on `shacraft_admission:proof` contains ticket (43) and standard
 Base64 signature (88). The transcript has no final newline:
 

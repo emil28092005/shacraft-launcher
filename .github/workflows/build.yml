@@ -3,7 +3,7 @@ name: Cross-platform build
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, codex/server-migration-20260917]
 
 permissions:
   contents: read

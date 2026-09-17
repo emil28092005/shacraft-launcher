@@ -359,3 +359,20 @@ The integration is staged until server authentication, signed profile payload,
 and a newer signed launcher release are deployed and checked together. The
 existing public 0.1.5 binary cannot select the new profile by a website-only
 catalog change. Preserve both catalog entries when publishing either profile.
+
+## Server migration — launcher 0.1.7 (2026-09-17)
+
+Minigames Quick Play now uses the fixed native endpoint `shacraft.ru:25568`.
+It no longer pins the retired server IP in the application binary. The Fabric
+admission client accepts the new actual socket IP `135.106.219.182` and retains
+`135.106.154.86` for the temporary forwarding path; unrelated hosts and ports
+remain rejected. The server published updated signed companion manifests.
+
+The migration's full-platform packages are prepared on
+`codex/server-migration-20260917`. Existing 0.1.6 installers still connect to the
+old IP and need that forwarding path until upgraded. Version 0.1.7 uses a newly generated operator-held updater key and the fixed
+`https://shacraft.ru/launcher/updates/stable-v2.json` channel. It requires one
+manual installation. Preserve `stable.json` at the last old-key release; never
+replace it with new-key metadata. Subsequent v2-channel releases use the new
+key, kept only at `/home/emil/.local/share/shacraft-updater/production.key`.
+Do not claim publication based on CI packages alone.

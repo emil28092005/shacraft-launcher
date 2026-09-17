@@ -62,6 +62,6 @@ public final class AdmissionProof {
         if (allowLoopback && (host.equals("127.0.0.1") || host.equals("::1") || host.equals("[::1]") || host.equals("0:0:0:0:0:0:0:1"))) {
             return port > 0 && port <= 65535;
         }
-        return port == 25568 && (host.equalsIgnoreCase("shacraft.ru") || host.equals("135.106.154.86"));
+        return port == 25568 && (host.equalsIgnoreCase("shacraft.ru") || host.equals("135.106.154.86") || host.equals("135.106.219.182"));
     }
 }
